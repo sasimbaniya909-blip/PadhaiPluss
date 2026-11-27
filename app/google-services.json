@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "849884863140",
+    "project_id": "padhaiplus-f381a",
+    "storage_bucket": "padhaiplus-f381a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:849884863140:android:0dab097d71bb2c0f826431",
+        "android_client_info": {
+          "package_name": "com.ps.padhaiplus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBVhCJ2dUC2aQipl6U81axzvbyiWqucD-o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
