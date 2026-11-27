@@ -27,8 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +39,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
 import com.ps.padhaiplus.ui.theme.PadhaiPlusTheme
 import kotlinx.coroutines.delay
+import java.util.UUID
 
 data class RoutineItem(
     val id: Int = (0..100000).random(),
@@ -94,17 +93,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PadhaiPlusApp() {
     val context = LocalContext.current
-    val db = remember { FirebaseFirestore.getInstance() }
+    val db = remember {
+        FirebaseFirestore.getInstance().apply {
+            enableNetwork()
+        }
+    }
     val sharedPref = remember { context.getSharedPreferences("padhai_prefs", Context.MODE_PRIVATE) }
 
-    // Login credentials & states (no auto-login / keep me logged in)
+    // Login credentials & states (Simple Student Name / ID Entry)
     var studentName by remember { mutableStateOf("") }
     var activeDocId by remember { mutableStateOf("") }
-    var passwordInput by remember { mutableStateOf("") }
-    var isPasswordVisible by remember { mutableStateOf(false) }
     var isLoggedIn by remember { mutableStateOf(false) }
     var avatarPic by remember { mutableStateOf(sharedPref.getString("student_avatar", "🎓") ?: "🎓") }
-    var showForgotPasswordDialog by remember { mutableStateOf(false) }
 
     // Format & Navigation options
     var selectedSection by remember { mutableStateOf(0) }
@@ -157,6 +157,20 @@ fun PadhaiPlusApp() {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Single Active Session Enforcement Check
+    LaunchedEffect(isLoggedIn, activeDocId) {
+        if (isLoggedIn && activeDocId.isNotBlank()) {
+            db.collection("students").document(activeDocId).get().addOnSuccessListener { document ->
+                val activeSession = document.getString("active_session")
+                val localSession = sharedPref.getString("session_id", "")
+                if (activeSession != null && localSession != null && activeSession != localSession) {
+                    isLoggedIn = false
+                    Toast.makeText(context, "Logged out: Account in use on another device", Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
@@ -217,7 +231,7 @@ fun PadhaiPlusApp() {
         }
     }
 
-    // LOGIN & NEW ID REGISTRATION SCREEN
+    // SIMPLE STUDENT NAME / ID LOGIN SCREEN (No email/password required)
     if (!isLoggedIn) {
         Column(
             modifier = Modifier
@@ -247,145 +261,61 @@ fun PadhaiPlusApp() {
             OutlinedTextField(
                 value = studentName,
                 onValueChange = { studentName = it },
-                label = { Text("Student Name / New ID") },
+                label = { Text("Student Name / ID") },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(12.dp))
 
-            OutlinedTextField(
-                value = passwordInput,
-                onValueChange = { passwordInput = it },
-                label = { Text("Account Password") },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
-                        Text(if (isPasswordVisible) "🙈" else "👁️")
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Spacer(Modifier.height(8.dp))
-
-            // Forgot Password link
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = { showForgotPasswordDialog = true }) {
-                    Text("Forgot Password?", fontSize = 13.sp)
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
 
             Button(
                 onClick = {
-                    if (studentName.isNotBlank() && passwordInput.isNotBlank()) {
+                    if (studentName.isNotBlank()) {
                         val cleanName = studentName.trim()
                         val baseId = cleanName.lowercase().replace(Regex("[^a-z0-9_]"), "_").ifBlank { "student" }
 
-                        db.collection("students").document(baseId).get().addOnSuccessListener { doc ->
-                            if (doc.exists()) {
-                                val storedPass = doc.getString("password") ?: ""
-                                if (storedPass == passwordInput) {
-                                    studentName = cleanName
+                        db.collection("students").document(baseId).get()
+                            .addOnSuccessListener { doc ->
+                                if (doc.exists()) {
+                                    studentName = doc.getString("name") ?: cleanName
+                                    avatarPic = doc.getString("avatar") ?: "🎓"
                                     activeDocId = baseId
                                     isLoggedIn = true
+                                    Toast.makeText(context, "Welcome back, $cleanName!", Toast.LENGTH_SHORT).show()
                                 } else {
-                                    val uniqueId = "${baseId}_${(1000..9999).random()}"
                                     val updates = hashMapOf<String, Any>(
                                         "name" to cleanName,
-                                        "password" to passwordInput,
                                         "avatar" to avatarPic,
                                         "isStudying" to false,
                                         "todayMinutes" to 0,
                                         "completionPercent" to 0
                                     )
-                                    db.collection("students").document(uniqueId).set(updates, SetOptions.merge())
-                                    studentName = cleanName
-                                    activeDocId = uniqueId
-                                    Toast.makeText(context, "Created new ID: $uniqueId", Toast.LENGTH_SHORT).show()
-                                    isLoggedIn = true
+                                    db.collection("students").document(baseId).set(updates, SetOptions.merge())
+                                        .addOnSuccessListener {
+                                            studentName = cleanName
+                                            activeDocId = baseId
+                                            isLoggedIn = true
+                                            Toast.makeText(context, "Created new ID: $baseId", Toast.LENGTH_SHORT).show()
+                                        }
+                                        .addOnFailureListener { e ->
+                                            Toast.makeText(context, "Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                        }
                                 }
-                            } else {
-                                val updates = hashMapOf<String, Any>(
-                                    "name" to cleanName,
-                                    "password" to passwordInput,
-                                    "avatar" to avatarPic,
-                                    "isStudying" to false,
-                                    "todayMinutes" to 0,
-                                    "completionPercent" to 0
-                                )
-                                db.collection("students").document(baseId).set(updates, SetOptions.merge())
-                                studentName = cleanName
-                                activeDocId = baseId
-                                Toast.makeText(context, "Created new ID: $baseId", Toast.LENGTH_SHORT).show()
-                                isLoggedIn = true
                             }
-                        }
+                            .addOnFailureListener { e ->
+                                Toast.makeText(context, "Connection Error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            }
                     } else {
-                        Toast.makeText(context, "Please enter both ID and Password", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Please enter your Student Name / ID", Toast.LENGTH_SHORT).show()
                     }
                 },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().height(50.dp)
             ) {
-                Text("Create / Enter with ID", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Text("Enter with ID", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
-
-        // Forgot Password Recovery Dialog
-        if (showForgotPasswordDialog) {
-            var resetId by remember { mutableStateOf(studentName) }
-            var newPass by remember { mutableStateOf("") }
-
-            AlertDialog(
-                onDismissRequest = { showForgotPasswordDialog = false },
-                title = { Text("🔑 Reset Account Password") },
-                text = {
-                    Column {
-                        Text("Enter your Student ID and new password:", fontSize = 13.sp)
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = resetId,
-                            onValueChange = { resetId = it },
-                            label = { Text("Student ID / Name") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = newPass,
-                            onValueChange = { newPass = it },
-                            label = { Text("New Password") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        if (resetId.isNotBlank() && newPass.isNotBlank()) {
-                            val cleanId = resetId.trim().lowercase().replace(Regex("[^a-z0-9_]"), "_")
-                            db.collection("students").document(cleanId).set(
-                                mapOf("password" to newPass.trim()),
-                                SetOptions.merge()
-                            )
-                            Toast.makeText(context, "Password updated successfully!", Toast.LENGTH_SHORT).show()
-                            showForgotPasswordDialog = false
-                        }
-                    }) {
-                        Text("Save New Password")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showForgotPasswordDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
         return
     }
 
