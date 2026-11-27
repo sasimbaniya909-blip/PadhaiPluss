@@ -5,17 +5,20 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +27,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -34,16 +39,25 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
+import com.ps.padhaiplus.ui.theme.PadhaiPlusTheme
 import kotlinx.coroutines.delay
 
-// Data structure for a single study routine with time of day and alarm status
 data class RoutineItem(
     val id: Int = (0..100000).random(),
     val subject: String = "",
     val minutes: Int = 30,
     val hour: Int = 8,
     val minute: Int = 0,
-    val isEnabled: Boolean = true
+    val isEnabled: Boolean = true,
+    val isCompleted: Boolean = false
+)
+
+data class StudentRecord(
+    val name: String = "",
+    val avatar: String = "🎓",
+    val todayMinutes: Int = 0,
+    val completionPercent: Int = 0,
+    val isStudying: Boolean = false
 )
 
 class MainActivity : ComponentActivity() {
@@ -55,16 +69,21 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
 
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
+            PadhaiPlusTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     PadhaiPlusApp()
                 }
             }
@@ -78,12 +97,18 @@ fun PadhaiPlusApp() {
     val db = remember { FirebaseFirestore.getInstance() }
     val sharedPref = remember { context.getSharedPreferences("padhai_prefs", Context.MODE_PRIVATE) }
 
-    // Persistent login state
-    var studentName by remember { mutableStateOf(sharedPref.getString("student_name", "") ?: "") }
-    var isLoggedIn by remember { mutableStateOf(studentName.isNotBlank()) }
+    // Login credentials & states (no auto-login / keep me logged in)
+    var studentName by remember { mutableStateOf("") }
+    var activeDocId by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    var isLoggedIn by remember { mutableStateOf(false) }
+    var avatarPic by remember { mutableStateOf(sharedPref.getString("student_avatar", "🎓") ?: "🎓") }
+    var showForgotPasswordDialog by remember { mutableStateOf(false) }
 
-    // Navigation sections state: 0 = Routines & Alarms, 1 = Nepali Calendar, 2 = Leaderboard
+    // Format & Navigation options
     var selectedSection by remember { mutableStateOf(0) }
+    var is24HourFormat by remember { mutableStateOf(false) }
 
     // Routine inputs & storage
     var subjectInput by remember { mutableStateOf("") }
@@ -92,26 +117,41 @@ fun PadhaiPlusApp() {
     var minuteInput by remember { mutableStateOf("0") }
     var routines by remember { mutableStateOf(listOf<RoutineItem>()) }
 
-    // Interactive Time Adjuster dialog state
+    // Dialog states
     var editingRoutine by remember { mutableStateOf<RoutineItem?>(null) }
+    var showProfileDialog by remember { mutableStateOf(false) }
 
-    // Active Timer state
+    // Active Timer state, ML Kit Face Detection, & 60s Switch Grace Period
     var activeSubject by remember { mutableStateOf<String?>(null) }
     var secondsLeft by remember { mutableStateOf(0) }
     var totalSecondsPlanned by remember { mutableStateOf(0) }
     var isTimerPaused by remember { mutableStateOf(false) }
+    var isFaceDetectionEnabled by remember { mutableStateOf(true) }
+    var isFaceDetected by remember { mutableStateOf(true) }
+    var backgroundGraceSeconds by remember { mutableStateOf(60) }
+    var isAppInBackground by remember { mutableStateOf(false) }
 
     // Leaderboard state
-    var leaderboard by remember { mutableStateOf(listOf<Triple<String, Int, Boolean>>()) }
+    var leaderboard by remember { mutableStateOf(listOf<StudentRecord>()) }
 
-    // Observe Lifecycle to PAUSE timer when app leaves foreground
+    // Work Completion Percentage (%)
+    val completedMins = routines.filter { it.isCompleted }.sumOf { it.minutes }
+    val totalPlannedMins = routines.sumOf { it.minutes }.let { if (it == 0) 1 else it }
+    val completionPercent = ((completedMins.toFloat() / totalPlannedMins) * 100).toInt().coerceIn(0, 100)
+
+    // 1-MIN SWITCH WINDOW (Background lifecycle timer)
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_PAUSE) {
-                if (activeSubject != null) {
-                    isTimerPaused = true
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    isAppInBackground = true
                 }
+                Lifecycle.Event.ON_RESUME -> {
+                    isAppInBackground = false
+                    backgroundGraceSeconds = 60
+                }
+                else -> {}
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -120,77 +160,236 @@ fun PadhaiPlusApp() {
         }
     }
 
-    // 1. Listen to ALL students in real-time for leaderboard
+    // 60-second grace window countdown when backgrounded
+    LaunchedEffect(isAppInBackground, activeSubject, backgroundGraceSeconds) {
+        if (isAppInBackground && activeSubject != null && backgroundGraceSeconds > 0) {
+            delay(1000L)
+            backgroundGraceSeconds -= 1
+        } else if (isAppInBackground && activeSubject != null && backgroundGraceSeconds == 0) {
+            isTimerPaused = true
+        }
+    }
+
+    // AUTO-RESUME timer when face is re-detected by ML Kit
+    LaunchedEffect(isFaceDetected) {
+        if (isFaceDetected && activeSubject != null && !isAppInBackground) {
+            isTimerPaused = false
+        }
+    }
+
+    // 1. Real-time Leaderboard Listener
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
             db.collection("students").addSnapshotListener { snapshot, _ ->
                 if (snapshot != null) {
                     val list = snapshot.documents.map { doc ->
-                        val name = doc.getString("name") ?: "Student"
-                        val mins = doc.getLong("todayMinutes")?.toInt() ?: 0
-                        val live = doc.getBoolean("isStudying") ?: false
-                        Triple(name, mins, live)
-                    }.sortedByDescending { it.second }
+                        StudentRecord(
+                            name = doc.getString("name") ?: "Student",
+                            avatar = doc.getString("avatar") ?: "🎓",
+                            todayMinutes = doc.getLong("todayMinutes")?.toInt() ?: 0,
+                            completionPercent = doc.getLong("completionPercent")?.toInt() ?: 0,
+                            isStudying = doc.getBoolean("isStudying") ?: false
+                        )
+                    }
                     leaderboard = list
                 }
             }
         }
     }
 
-    // 2. Countdown Timer Loop (Pauses when app goes background)
-    LaunchedEffect(activeSubject, secondsLeft, isTimerPaused) {
+    // 2. Countdown Timer Loop
+    LaunchedEffect(activeSubject, secondsLeft, isTimerPaused, isFaceDetected, isFaceDetectionEnabled) {
+        if (activeSubject != null && isFaceDetectionEnabled && !isFaceDetected) {
+            isTimerPaused = true
+        }
+
         if (activeSubject != null && secondsLeft > 0 && !isTimerPaused) {
             delay(1000L)
             secondsLeft -= 1
         } else if (activeSubject != null && secondsLeft == 0) {
             val earnedMins = totalSecondsPlanned / 60
-            saveStudyProgress(db, studentName, earnedMins, isStudying = false, subject = "")
+            routines = routines.map { if (it.subject == activeSubject) it.copy(isCompleted = true) else it }
+            val newCompletion = ((routines.filter { it.isCompleted }.sumOf { it.minutes }.toFloat() / routines.sumOf { it.minutes }.let { if (it == 0) 1 else it }) * 100).toInt()
+
+            saveStudyProgress(db, activeDocId, studentName, avatarPic, earnedMins, newCompletion, isStudying = false, subject = "")
             activeSubject = null
             isTimerPaused = false
         }
     }
 
-    // SCREEN 1: Persistent Name Login
+    // LOGIN & NEW ID REGISTRATION SCREEN
     if (!isLoggedIn) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("PadhaiPLUS+", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text("Plan your routine. Track alarms. Compete with friends.")
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.padding(bottom = 16.dp)
+            ) {
+                Text(
+                    "🎓 PadhaiPLUS+",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
+                )
+            }
+
+            Text("Student Schedule, Alarms & Focus Tracker", fontSize = 14.sp, color = Color.Gray)
             Spacer(Modifier.height(24.dp))
+
             OutlinedTextField(
                 value = studentName,
                 onValueChange = { studentName = it },
-                label = { Text("Enter Your Name") },
+                label = { Text("Student Name / New ID") },
                 singleLine = true,
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    if (studentName.isNotBlank()) {
-                        val cleanName = studentName.trim()
-                        sharedPref.edit().putString("student_name", cleanName).apply()
-                        val cleanId = cleanName.lowercase()
-                        db.collection("students").document(cleanId).set(
-                            mapOf("name" to cleanName, "isStudying" to false),
-                            SetOptions.merge()
-                        )
-                        isLoggedIn = true
+            Spacer(Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = passwordInput,
+                onValueChange = { passwordInput = it },
+                label = { Text("Account Password") },
+                singleLine = true,
+                shape = RoundedCornerShape(12.dp),
+                visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
+                        Text(if (isPasswordVisible) "🙈" else "👁️")
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            // Forgot Password link
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { showForgotPasswordDialog = true }) {
+                    Text("Forgot Password?", fontSize = 13.sp)
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Button(
+                onClick = {
+                    if (studentName.isNotBlank() && passwordInput.isNotBlank()) {
+                        val cleanName = studentName.trim()
+                        val baseId = cleanName.lowercase().replace(Regex("[^a-z0-9_]"), "_").ifBlank { "student" }
+
+                        db.collection("students").document(baseId).get().addOnSuccessListener { doc ->
+                            if (doc.exists()) {
+                                val storedPass = doc.getString("password") ?: ""
+                                if (storedPass == passwordInput) {
+                                    studentName = cleanName
+                                    activeDocId = baseId
+                                    isLoggedIn = true
+                                } else {
+                                    val uniqueId = "${baseId}_${(1000..9999).random()}"
+                                    val updates = hashMapOf<String, Any>(
+                                        "name" to cleanName,
+                                        "password" to passwordInput,
+                                        "avatar" to avatarPic,
+                                        "isStudying" to false,
+                                        "todayMinutes" to 0,
+                                        "completionPercent" to 0
+                                    )
+                                    db.collection("students").document(uniqueId).set(updates, SetOptions.merge())
+                                    studentName = cleanName
+                                    activeDocId = uniqueId
+                                    Toast.makeText(context, "Created new ID: $uniqueId", Toast.LENGTH_SHORT).show()
+                                    isLoggedIn = true
+                                }
+                            } else {
+                                val updates = hashMapOf<String, Any>(
+                                    "name" to cleanName,
+                                    "password" to passwordInput,
+                                    "avatar" to avatarPic,
+                                    "isStudying" to false,
+                                    "todayMinutes" to 0,
+                                    "completionPercent" to 0
+                                )
+                                db.collection("students").document(baseId).set(updates, SetOptions.merge())
+                                studentName = cleanName
+                                activeDocId = baseId
+                                Toast.makeText(context, "Created new ID: $baseId", Toast.LENGTH_SHORT).show()
+                                isLoggedIn = true
+                            }
+                        }
+                    } else {
+                        Toast.makeText(context, "Please enter both ID and Password", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().height(50.dp)
             ) {
-                Text("Start Studying (Keep Me Logged In)")
+                Text("Create / Enter with ID", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
+
+        // Forgot Password Recovery Dialog
+        if (showForgotPasswordDialog) {
+            var resetId by remember { mutableStateOf(studentName) }
+            var newPass by remember { mutableStateOf("") }
+
+            AlertDialog(
+                onDismissRequest = { showForgotPasswordDialog = false },
+                title = { Text("🔑 Reset Account Password") },
+                text = {
+                    Column {
+                        Text("Enter your Student ID and new password:", fontSize = 13.sp)
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = resetId,
+                            onValueChange = { resetId = it },
+                            label = { Text("Student ID / Name") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = newPass,
+                            onValueChange = { newPass = it },
+                            label = { Text("New Password") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = {
+                        if (resetId.isNotBlank() && newPass.isNotBlank()) {
+                            val cleanId = resetId.trim().lowercase().replace(Regex("[^a-z0-9_]"), "_")
+                            db.collection("students").document(cleanId).set(
+                                mapOf("password" to newPass.trim()),
+                                SetOptions.merge()
+                            )
+                            Toast.makeText(context, "Password updated successfully!", Toast.LENGTH_SHORT).show()
+                            showForgotPasswordDialog = false
+                        }
+                    }) {
+                        Text("Save New Password")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showForgotPasswordDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         return
     }
 
-    // MAIN APP LAYOUT WITH 3 SECTIONS & BOTTOM NAVIGATION
+    // MAIN APP LAYOUT WITH 3 SECTIONS (NO LOGOUT BUTTON)
     Scaffold(
         bottomBar = {
             NavigationBar {
@@ -222,30 +421,44 @@ fun PadhaiPlusApp() {
                 .padding(16.dp)
         ) {
             // Header Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
             ) {
-                Column {
-                    Text("Welcome, $studentName!", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                    Text("Logged in session saved", fontSize = 12.sp, color = Color.Gray)
-                }
-                TextButton(onClick = {
-                    sharedPref.edit().remove("student_name").apply()
-                    isLoggedIn = false
-                }) {
-                    Text("Switch User")
+                Row(
+                    modifier = Modifier.padding(12.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { showProfileDialog = true }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(avatarPic, fontSize = 24.sp)
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(studentName, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text("Tap for Profile ⚙️", fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            // ACTIVE TIMER CARD (Visible across sections if timer is active)
+            // ACTIVE TIMER CARD (WITH ML KIT & 60s SWITCH GRACE WINDOW)
             if (activeSubject != null) {
                 Card(
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = if (isTimerPaused) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
+                        containerColor = if (isTimerPaused || !isFaceDetected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
                     ),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                 ) {
@@ -254,12 +467,40 @@ fun PadhaiPlusApp() {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            if (isTimerPaused) "⏸️ TIMER PAUSED (App Background)" else "🟢 LIVE STUDYING: $activeSubject",
+                            when {
+                                !isFaceDetected && isFaceDetectionEnabled -> "⚠️ NO FACE DETECTED (Auto-Resumes when detected)"
+                                isAppInBackground -> "⏱️ App Switch Grace Window: ${backgroundGraceSeconds}s left"
+                                isTimerPaused -> "⏸️ TIMER PAUSED"
+                                else -> "🟢 LIVE STUDYING: $activeSubject"
+                            },
                             fontWeight = FontWeight.Bold
                         )
                         val mins = secondsLeft / 60
                         val secs = secondsLeft % 60
                         Text(String.format("%02d:%02d", mins, secs), fontSize = 36.sp, fontWeight = FontWeight.Bold)
+
+                        // ML Kit Camera Preview & Presence Status
+                        if (isFaceDetectionEnabled) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            ) {
+                                Box(modifier = Modifier.size(40.dp).clip(CircleShape)) {
+                                    FaceDetectionCameraPreview(
+                                        onFacePresenceChanged = { hasFace -> isFaceDetected = hasFace },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (isFaceDetected) "👤 ML Kit Face Detected (Active)" else "❌ Face Away! Auto-resumes on return",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isFaceDetected) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { isTimerPaused = !isTimerPaused }) {
@@ -270,7 +511,10 @@ fun PadhaiPlusApp() {
                                 onClick = {
                                     val studiedSeconds = totalSecondsPlanned - secondsLeft
                                     val earnedMins = studiedSeconds / 60
-                                    saveStudyProgress(db, studentName, earnedMins, isStudying = false, subject = "")
+                                    routines = routines.map { if (it.subject == activeSubject) it.copy(isCompleted = true) else it }
+                                    val newCompletion = ((routines.filter { it.isCompleted }.sumOf { it.minutes }.toFloat() / routines.sumOf { it.minutes }.let { if (it == 0) 1 else it }) * 100).toInt()
+
+                                    saveStudyProgress(db, activeDocId, studentName, avatarPic, earnedMins, newCompletion, isStudying = false, subject = "")
                                     activeSubject = null
                                     isTimerPaused = false
                                 }
@@ -294,6 +538,9 @@ fun PadhaiPlusApp() {
                     minuteInput = minuteInput,
                     onMinuteChange = { minuteInput = it },
                     routines = routines,
+                    completionPercent = completionPercent,
+                    is24HourFormat = is24HourFormat,
+                    onToggle24HourFormat = { is24HourFormat = it },
                     activeSubject = activeSubject,
                     onAddRoutine = {
                         val mins = minutesInput.toIntOrNull() ?: 30
@@ -325,7 +572,7 @@ fun PadhaiPlusApp() {
                         totalSecondsPlanned = item.minutes * 60
                         secondsLeft = item.minutes * 60
                         isTimerPaused = false
-                        saveStudyProgress(db, studentName, 0, isStudying = true, subject = item.subject)
+                        saveStudyProgress(db, activeDocId, studentName, avatarPic, 0, completionPercent, isStudying = true, subject = item.subject)
                     },
                     onEditRoutineAlarm = { item -> editingRoutine = item }
                 )
@@ -333,6 +580,23 @@ fun PadhaiPlusApp() {
                 2 -> LeaderboardSection(leaderboard = leaderboard)
             }
         }
+    }
+
+    // Profile Dialog
+    if (showProfileDialog) {
+        val totalStudied = leaderboard.find { it.name.lowercase() == studentName.lowercase() }?.todayMinutes ?: 0
+        ProfileDialog(
+            studentName = studentName,
+            currentAvatar = avatarPic,
+            todayMinutes = totalStudied,
+            completionPercent = completionPercent,
+            onDismiss = { showProfileDialog = false },
+            onSaveAvatar = { newAvatar ->
+                avatarPic = newAvatar
+                sharedPref.edit().putString("student_avatar", newAvatar).apply()
+                saveStudyProgress(db, activeDocId, studentName, newAvatar, 0, completionPercent, isStudying = activeSubject != null, subject = activeSubject ?: "")
+            }
+        )
     }
 
     // Interactive Time Adjuster Dialog
@@ -351,7 +615,7 @@ fun PadhaiPlusApp() {
     }
 }
 
-// SECTION 1: Routine & Alarm System
+// SECTION 1: SCROLLABLE ROUTINE & ALARM CREATION WITH 24-HOUR FORMAT SUPPORT
 @Composable
 fun RoutineAndAlarmsSection(
     subjectInput: String,
@@ -363,20 +627,66 @@ fun RoutineAndAlarmsSection(
     minuteInput: String,
     onMinuteChange: (String) -> Unit,
     routines: List<RoutineItem>,
+    completionPercent: Int,
+    is24HourFormat: Boolean,
+    onToggle24HourFormat: (Boolean) -> Unit,
     activeSubject: String?,
     onAddRoutine: () -> Unit,
     onToggleAlarm: (RoutineItem, Boolean) -> Unit,
     onStartRoutine: (RoutineItem) -> Unit,
     onEditRoutineAlarm: (RoutineItem) -> Unit
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text("Add Routine & Daily Alarm", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        // Work Completion Progress Bar
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("🎯 Today's Work Completion", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("$completionPercent%", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                LinearProgressIndicator(
+                    progress = { completionPercent / 100f },
+                    modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp))
+                )
+            }
+        }
+
+        // Header + 24-Hour Format Toggle Switch
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Add Routine & Daily Alarm", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(if (is24HourFormat) "24-Hr" else "12-Hr", fontSize = 12.sp)
+                Spacer(Modifier.width(4.dp))
+                Switch(
+                    checked = is24HourFormat,
+                    onCheckedChange = onToggle24HourFormat
+                )
+            }
+        }
+
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = subjectInput,
                 onValueChange = onSubjectChange,
                 label = { Text("Subject") },
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(1.5f)
             )
             Spacer(Modifier.width(4.dp))
@@ -384,6 +694,7 @@ fun RoutineAndAlarmsSection(
                 value = minutesInput,
                 onValueChange = onMinutesChange,
                 label = { Text("Mins") },
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(0.8f)
             )
         }
@@ -392,7 +703,8 @@ fun RoutineAndAlarmsSection(
             OutlinedTextField(
                 value = hourInput,
                 onValueChange = onHourChange,
-                label = { Text("Hour (0-23)") },
+                label = { Text(if (is24HourFormat) "Hour (0-23)" else "Hour (1-12)") },
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(8.dp))
@@ -400,11 +712,13 @@ fun RoutineAndAlarmsSection(
                 value = minuteInput,
                 onValueChange = onMinuteChange,
                 label = { Text("Min (0-59)") },
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = onAddRoutine,
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.height(56.dp)
             ) {
                 Text("+ Add")
@@ -412,33 +726,48 @@ fun RoutineAndAlarmsSection(
         }
 
         Spacer(Modifier.height(16.dp))
-        Text("Your Routines & Vibration Alarms", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("Your Routines & Ringing Alarms", fontWeight = FontWeight.Bold, fontSize = 16.sp)
         Spacer(Modifier.height(4.dp))
 
         if (routines.isEmpty()) {
             Box(
-                modifier = Modifier.fillMaxWidth().weight(1f),
+                modifier = Modifier.fillMaxWidth().height(150.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text("No study routines added yet. Create one above!", color = Color.Gray)
             }
         } else {
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(routines) { item ->
-                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Column {
+                routines.forEach { item ->
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
                         Row(
                             modifier = Modifier.padding(12.dp).fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(item.subject, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                val amPm = if (item.hour >= 12) "PM" else "AM"
-                                val displayHour = if (item.hour % 12 == 0) 12 else item.hour % 12
-                                val timeFormatted = String.format("%02d:%02d %s", displayHour, item.minute, amPm)
-                                Text("🕒 $timeFormatted | ⏱️ ${item.minutes} mins")
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(item.subject, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                    if (item.isCompleted) {
+                                        Spacer(Modifier.width(6.dp))
+                                        Text("✅ Done", fontSize = 12.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
+                                val timeFormatted = if (is24HourFormat) {
+                                    String.format("%02d:%02d", item.hour, item.minute)
+                                } else {
+                                    val amPm = if (item.hour >= 12) "PM" else "AM"
+                                    val displayHour = if (item.hour % 12 == 0) 12 else item.hour % 12
+                                    String.format("%02d:%02d %s", displayHour, item.minute, amPm)
+                                }
+
+                                Text("⏰ $timeFormatted | ⏱️ ${item.minutes} mins")
                                 Text(
-                                    "📳 Alarm: ${if (item.isEnabled) "ENABLED" else "DISABLED"}",
+                                    "🔔 Ringing Alarm: ${if (item.isEnabled) "ENABLED" else "DISABLED"}",
                                     fontSize = 12.sp,
                                     color = if (item.isEnabled) MaterialTheme.colorScheme.primary else Color.Gray
                                 )
@@ -455,10 +784,10 @@ fun RoutineAndAlarmsSection(
                                     }
                                 }
                                 Button(
-                                    enabled = activeSubject == null,
+                                    enabled = activeSubject == null && !item.isCompleted,
                                     onClick = { onStartRoutine(item) }
                                 ) {
-                                    Text("Start")
+                                    Text(if (item.isCompleted) "Completed" else "Start")
                                 }
                             }
                         }
@@ -469,7 +798,7 @@ fun RoutineAndAlarmsSection(
     }
 }
 
-// SECTION 2: Nepali Bikram Sambat (BS) Calendar
+// SECTION 2: NEPALI BIKRAM SAMBAT (BS) CALENDAR
 @Composable
 fun NepaliCalendarSection() {
     val todayNepali = remember { NepaliCalendarUtils.getCurrentNepaliDate() }
@@ -480,6 +809,7 @@ fun NepaliCalendarSection() {
 
     Column(modifier = Modifier.fillMaxSize()) {
         Card(
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
         ) {
@@ -491,7 +821,6 @@ fun NepaliCalendarSection() {
             }
         }
 
-        // Month Navigation
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -510,7 +839,6 @@ fun NepaliCalendarSection() {
             }
         }
 
-        // Weekday Headers
         Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             NepaliCalendarUtils.weekDays.forEach { day ->
                 Text(
@@ -523,7 +851,6 @@ fun NepaliCalendarSection() {
             }
         }
 
-        // Days Grid
         LazyVerticalGrid(
             columns = GridCells.Fixed(7),
             modifier = Modifier.fillMaxWidth().weight(1f)
@@ -553,59 +880,110 @@ fun NepaliCalendarSection() {
     }
 }
 
-// SECTION 3: Leaderboard with Dynamic Achievement Badges
+// SECTION 3: DUAL LEADERBOARDS (HIGH HOURS VS PLAN COMPLETION %)
 @Composable
-fun LeaderboardSection(leaderboard: List<Triple<String, Int, Boolean>>) {
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text("🏆 Live Friends Study Leaderboard", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-        Text("Earn badges as you log more study minutes!", fontSize = 12.sp, color = Color.Gray)
-        Spacer(Modifier.height(12.dp))
+fun LeaderboardSection(leaderboard: List<StudentRecord>) {
+    var leaderboardMode by remember { mutableStateOf(0) }
 
-        if (leaderboard.isEmpty()) {
+    val sortedList = remember(leaderboard, leaderboardMode) {
+        if (leaderboardMode == 0) {
+            leaderboard.sortedByDescending { it.todayMinutes }
+        } else {
+            leaderboard.sortedByDescending { it.completionPercent }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text("🏆 Friends Study Leaderboards", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        Text("Compete for high hours & plan completion!", fontSize = 12.sp, color = Color.Gray)
+        Spacer(Modifier.height(8.dp))
+
+        PrimaryTabRow(selectedTabIndex = leaderboardMode) {
+            Tab(
+                selected = leaderboardMode == 0,
+                onClick = { leaderboardMode = 0 },
+                text = { Text("⏱️ High Hours") }
+            )
+            Tab(
+                selected = leaderboardMode == 1,
+                onClick = { leaderboardMode = 1 },
+                text = { Text("🎯 Plan Done %") }
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        if (sortedList.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("No friends on leaderboard yet. Be the first!", color = Color.Gray)
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(leaderboard.size) { rankIndex ->
-                    val (name, mins, isLive) = leaderboard[rankIndex]
+                items(sortedList.size) { rankIndex ->
+                    val student = sortedList[rankIndex]
                     val rank = rankIndex + 1
 
-                    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                    ) {
                         Row(
                             modifier = Modifier.padding(12.dp).fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text("#$rank ", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text(name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    if (isLive) {
-                                        Spacer(Modifier.width(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFF4CAF50))
-                                        )
-                                    }
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                Text("#$rank ", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(student.avatar, fontSize = 20.sp)
                                 }
-                                Spacer(Modifier.height(4.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    // Dynamic Badges
-                                    if (rank == 1) BadgeChip("👑 #1 Champ", Color(0xFFFFD700))
-                                    if (isLive) BadgeChip("🟢 Studying Now", Color(0xFF81C784))
-                                    when {
-                                        mins >= 500 -> BadgeChip("🏆 Legend", Color(0xFFE040FB))
-                                        mins >= 200 -> BadgeChip("🥇 Master", Color(0xFFFFB74D))
-                                        mins >= 100 -> BadgeChip("🥈 Pro", Color(0xFF90CAF9))
-                                        mins >= 30 -> BadgeChip("🥉 Scholar", Color(0xFFA1887F))
-                                        else -> BadgeChip("⚡ Rookie", Color(0xFFB0BEC5))
+                                Spacer(Modifier.width(8.dp))
+                                Column {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(student.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                        if (student.isStudying) {
+                                            Spacer(Modifier.width(6.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF4CAF50))
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        if (rank == 1) BadgeChip("👑 #1 Champ", Color(0xFFFFD700))
+                                        if (student.isStudying) BadgeChip("🟢 Studying", Color(0xFF81C784))
+                                        when {
+                                            student.todayMinutes >= 500 -> BadgeChip("🏆 Legend", Color(0xFFE040FB))
+                                            student.todayMinutes >= 200 -> BadgeChip("🥇 Master", Color(0xFFFFB74D))
+                                            student.todayMinutes >= 100 -> BadgeChip("🥈 Pro", Color(0xFF90CAF9))
+                                            student.todayMinutes >= 30 -> BadgeChip("🥉 Scholar", Color(0xFFA1887F))
+                                            else -> BadgeChip("⚡ Rookie", Color(0xFFB0BEC5))
+                                        }
                                     }
                                 }
                             }
-                            Text("$mins mins", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Column(horizontalAlignment = Alignment.End) {
+                                Text(
+                                    if (leaderboardMode == 0) "${student.todayMinutes} mins" else "${student.completionPercent}%",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    if (leaderboardMode == 0) "${student.completionPercent}% done" else "${student.todayMinutes} mins studied",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
                         }
                     }
                 }
@@ -704,16 +1082,23 @@ fun InteractiveAlarmAdjusterDialog(
 
 fun saveStudyProgress(
     db: FirebaseFirestore,
+    docId: String,
     studentName: String,
+    avatar: String,
     minutesToAdd: Int,
+    completionPercent: Int,
     isStudying: Boolean,
     subject: String
 ) {
-    val cleanId = studentName.trim().lowercase()
+    val cleanId = docId.ifBlank {
+        studentName.trim().lowercase().replace(Regex("[^a-z0-9_]"), "_").ifBlank { "student" }
+    }
     val updates = hashMapOf<String, Any>(
         "name" to studentName.trim(),
+        "avatar" to avatar,
         "isStudying" to isStudying,
-        "currentSubject" to subject
+        "currentSubject" to subject,
+        "completionPercent" to completionPercent
     )
     if (minutesToAdd > 0) {
         updates["todayMinutes"] = FieldValue.increment(minutesToAdd.toLong())
