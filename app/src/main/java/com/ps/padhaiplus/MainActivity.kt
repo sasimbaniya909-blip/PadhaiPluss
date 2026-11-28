@@ -1,7 +1,6 @@
 package com.ps.padhaiplus
 
 import android.Manifest
-import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
@@ -11,14 +10,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -30,18 +29,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -51,10 +47,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -66,48 +60,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
-import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
-import androidx.credentials.exceptions.GetCredentialException
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.SetOptions
-import com.google.firebase.firestore.Source
 import com.ps.padhaiplus.ui.theme.AppThemeStyle
 import com.ps.padhaiplus.ui.theme.LocalAppTheme
 import com.ps.padhaiplus.ui.theme.PadhaiPlusTheme
 import com.ps.padhaiplus.ui.theme.PastelBlobBackground
-import com.ps.padhaiplus.ui.theme.SubjectSwatchColors
 import com.ps.padhaiplus.ui.theme.SubjectSwatchIcons
+import com.ps.padhaiplus.ui.theme.ThemeMode
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 data class RoutineItem(
     val id: Int = (0..100000).random(),
     val subject: String = "",
-    val minutes: Int = 60,
+    val startTime: String = "08:00",
+    val endTime: String = "09:30",
+    val minutes: Int = 90,
     val hour: Int = 8,
     val minute: Int = 0,
     val isEnabled: Boolean = true,
@@ -158,23 +154,155 @@ class MainActivity : ComponentActivity() {
             val sharedPref = remember {
                 context.getSharedPreferences("padhaiplus_prefs", MODE_PRIVATE)
             }
+            var themeMode by remember {
+                mutableStateOf(ThemeMode.fromId(sharedPref.getString("theme_mode", null)))
+            }
             var currentTheme by remember {
-                mutableStateOf(
-                    AppThemeStyle.fromId(sharedPref.getString("app_theme", null))
-                )
+                mutableStateOf(AppThemeStyle.fromId(sharedPref.getString("app_theme", null)))
             }
 
-            PadhaiPlusTheme(selectedTheme = currentTheme) {
+            PadhaiPlusTheme(themeMode = themeMode, selectedTheme = currentTheme) {
                 PadhaiPlusApp(
                     activity = this@MainActivity,
                     sharedPref = sharedPref,
                     currentTheme = currentTheme,
+                    themeMode = themeMode,
                     onSelectTheme = { newTheme ->
                         currentTheme = newTheme
                         sharedPref.edit { putString("app_theme", newTheme.id) }
+                    },
+                    onSelectThemeMode = { newMode ->
+                        themeMode = newMode
+                        sharedPref.edit { putString("theme_mode", newMode.id) }
                     }
                 )
             }
+        }
+    }
+}
+
+// Custom App Logo Icon matching the stopwatch on open book artwork
+@Composable
+fun PadhaiPlusAppLogo(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .shadow(12.dp, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp))
+            .background(Color(0xFF0F172A)),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val w = size.width
+            val h = size.height
+
+            // 1. Open Book at bottom
+            val leftBookPath = Path().apply {
+                moveTo(w * 0.12f, h * 0.58f)
+                lineTo(w * 0.5f, h * 0.65f)
+                lineTo(w * 0.5f, h * 0.83f)
+                lineTo(w * 0.12f, h * 0.78f)
+                close()
+            }
+            drawPath(leftBookPath, color = Color(0xFFF1ECE1))
+
+            val rightBookPath = Path().apply {
+                moveTo(w * 0.5f, h * 0.65f)
+                lineTo(w * 0.88f, h * 0.58f)
+                lineTo(w * 0.88f, h * 0.78f)
+                lineTo(w * 0.5f, h * 0.83f)
+                close()
+            }
+            drawPath(rightBookPath, color = Color(0xFFE2D9C8))
+
+            // 2. Stopwatch Gold Outer Frame & Ring
+            val clockCenter = Offset(w * 0.5f, h * 0.41f)
+            val clockRadius = w * 0.22f
+
+            // Top Crown Button
+            drawRoundRect(
+                color = Color(0xFFF59E0B),
+                topLeft = Offset(w * 0.43f, h * 0.13f),
+                size = Size(w * 0.14f, h * 0.05f),
+                cornerRadius = CornerRadius(4f, 4f)
+            )
+            drawRect(
+                color = Color(0xFFF59E0B),
+                topLeft = Offset(w * 0.47f, h * 0.17f),
+                size = Size(w * 0.06f, h * 0.035f)
+            )
+
+            // Top-right Angled Pusher Button
+            val pusherPath = Path().apply {
+                moveTo(w * 0.65f, h * 0.17f)
+                lineTo(w * 0.73f, h * 0.23f)
+                lineTo(w * 0.69f, h * 0.27f)
+                lineTo(w * 0.61f, h * 0.21f)
+                close()
+            }
+            drawPath(pusherPath, color = Color(0xFFF59E0B))
+
+            // Outer Gold Circle Ring
+            drawCircle(
+                color = Color(0xFFF59E0B),
+                radius = clockRadius,
+                center = clockCenter,
+                style = Stroke(width = w * 0.045f)
+            )
+
+            // Inner Dark Clock Face
+            drawCircle(
+                color = Color(0xFF0F172A),
+                radius = clockRadius - (w * 0.022f),
+                center = clockCenter
+            )
+
+            // 3. Tick marks at 12, 3, 6, 9 o'clock
+            val tickLength = w * 0.035f
+            drawLine(
+                color = Color(0xFF94A3B8),
+                start = Offset(clockCenter.x, clockCenter.y - clockRadius + w * 0.04f),
+                end = Offset(clockCenter.x, clockCenter.y - clockRadius + w * 0.04f + tickLength),
+                strokeWidth = 3f
+            )
+            drawLine(
+                color = Color(0xFF94A3B8),
+                start = Offset(clockCenter.x, clockCenter.y + clockRadius - w * 0.04f - tickLength),
+                end = Offset(clockCenter.x, clockCenter.y + clockRadius - w * 0.04f),
+                strokeWidth = 3f
+            )
+            drawLine(
+                color = Color(0xFF94A3B8),
+                start = Offset(clockCenter.x - clockRadius + w * 0.04f, clockCenter.y),
+                end = Offset(clockCenter.x - clockRadius + w * 0.04f + tickLength, clockCenter.y),
+                strokeWidth = 3f
+            )
+            drawLine(
+                color = Color(0xFF94A3B8),
+                start = Offset(clockCenter.x + clockRadius - w * 0.04f - tickLength, clockCenter.y),
+                end = Offset(clockCenter.x + clockRadius - w * 0.04f, clockCenter.y),
+                strokeWidth = 3f
+            )
+
+            // 4. Clock Hands (Hour hand at 4 o'clock, Minute hand at 12 o'clock)
+            drawLine(
+                color = Color(0xFFFEF08A),
+                start = clockCenter,
+                end = Offset(clockCenter.x, clockCenter.y - clockRadius * 0.65f),
+                strokeWidth = 5f
+            )
+            drawLine(
+                color = Color(0xFFFEF08A),
+                start = clockCenter,
+                end = Offset(clockCenter.x + clockRadius * 0.45f, clockCenter.y + clockRadius * 0.28f),
+                strokeWidth = 5f
+            )
+
+            // Pivot Center Dot
+            drawCircle(
+                color = Color(0xFFF59E0B),
+                radius = w * 0.025f,
+                center = clockCenter
+            )
         }
     }
 }
@@ -185,16 +313,14 @@ fun PadhaiPlusApp(
     activity: ComponentActivity,
     sharedPref: SharedPreferences,
     currentTheme: AppThemeStyle,
+    themeMode: ThemeMode,
     onSelectTheme: (AppThemeStyle) -> Unit,
+    onSelectThemeMode: (ThemeMode) -> Unit,
 ) {
     val context = LocalContext.current
     val theme = LocalAppTheme.current
     val scope = rememberCoroutineScope()
-    val db = remember {
-        FirebaseFirestore.getInstance().apply {
-            enableNetwork()
-        }
-    }
+    val db = remember { FirebaseFirestore.getInstance().apply { enableNetwork() } }
     val auth = remember { FirebaseAuth.getInstance() }
     val credentialManager = remember { CredentialManager.create(context) }
 
@@ -203,12 +329,13 @@ fun PadhaiPlusApp(
         mutableStateOf(sharedPref.getBoolean("is_logged_in", false) || auth.currentUser != null)
     }
     var studentName by remember {
-        mutableStateOf(sharedPref.getString("student_name", "") ?: "")
+        mutableStateOf(sharedPref.getString("student_name", "Sasim") ?: "Sasim")
     }
     var studentEmail by remember {
         mutableStateOf(sharedPref.getString("student_email", "") ?: "")
     }
     var studentNameInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
     var activeDocId by remember {
         mutableStateOf(sharedPref.getString("active_doc_id", "") ?: "")
     }
@@ -223,7 +350,7 @@ fun PadhaiPlusApp(
         val currentUser = auth.currentUser
         if (currentUser != null && !isLoggedIn) {
             val uid = currentUser.uid
-            val fallbackName = currentUser.displayName?.takeIf { it.isNotBlank() } ?: "Student"
+            val fallbackName = currentUser.displayName?.takeIf { it.isNotBlank() } ?: "Sasim"
             val email = currentUser.email.orEmpty()
             val docId = uid.ifBlank { email.replace("@", "_").replace(".", "_") }
             db.collection("students").document(docId).get()
@@ -243,16 +370,18 @@ fun PadhaiPlusApp(
         }
     }
 
-    // Format & Navigation options
+    // Navigation state
     var selectedSection by remember { mutableIntStateOf(0) }
-    var is24HourFormat by remember { mutableStateOf(true) }
 
-    // Routine inputs & storage (Hour & Minute only)
+    // Routine inputs & storage - STARTS EMPTY
     var subjectInput by remember { mutableStateOf("") }
-    var hourInput by remember { mutableStateOf("8") }
-    var minuteInput by remember { mutableStateOf("0") }
-    var selectedColorIndex by remember { mutableIntStateOf(0) }
-    var routines by remember { mutableStateOf(loadRoutines(sharedPref)) }
+    var startTimeInput by remember { mutableStateOf("08:00") }
+    var endTimeInput by remember { mutableStateOf("09:30") }
+    var editingRoutine by remember { mutableStateOf<RoutineItem?>(null) }
+
+    var routines by remember {
+        mutableStateOf(loadRoutines(sharedPref))
+    }
 
     LaunchedEffect(routines) {
         saveRoutines(sharedPref, routines)
@@ -260,148 +389,86 @@ fun PadhaiPlusApp(
 
     // Dialog & BottomSheet states
     var showAddSubjectSheet by remember { mutableStateOf(false) }
-    var editingRoutine by remember { mutableStateOf<RoutineItem?>(null) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showThemeSelectionScreen by remember { mutableStateOf(false) }
 
-    // Active Timer state, ML Kit Face Detection, & 60s Switch Grace Period
-    var activeSubject by remember { mutableStateOf<String?>(null) }
-    var secondsLeft by remember { mutableIntStateOf(0) }
-    var totalSecondsPlanned by remember { mutableIntStateOf(0) }
+    LaunchedEffect(selectedSection) {
+        if (selectedSection != 3) {
+            showThemeSelectionScreen = false
+        }
+    }
+
+    // Active Study Session Timer state & Face Detection
+    var activeRoutine by remember { mutableStateOf<RoutineItem?>(null) }
+    var secondsLeft by remember { mutableIntStateOf(2700) }
     var isTimerPaused by remember { mutableStateOf(false) }
-    val isFaceDetectionEnabled = true
     var isFaceDetected by remember { mutableStateOf(true) }
-    var backgroundGraceSeconds by remember { mutableIntStateOf(60) }
-    var isAppInBackground by remember { mutableStateOf(false) }
+    var isBannerDismissed by remember { mutableStateOf(false) }
 
     // Leaderboard state
     var leaderboard by remember { mutableStateOf(listOf<StudentRecord>()) }
 
-    val myTodayStudiedMinutes =
-        leaderboard.find {
-            (activeDocId.isNotBlank() && it.uid == activeDocId) ||
-                    it.name.equals(studentName, ignoreCase = true)
-        }?.todayMinutes ?: 0
+    val myTodayStudiedMinutes = leaderboard.find {
+        (activeDocId.isNotBlank() && it.uid == activeDocId) ||
+                it.name.equals(studentName, ignoreCase = true)
+    }?.todayMinutes ?: 0
 
-    // Work Completion Percentage (%) based on planned study time vs actual studied time
     val totalPlannedMins = routines.sumOf { it.minutes }.let { if (it == 0) 1 else it }
     val completionPercent =
-        ((myTodayStudiedMinutes.toFloat() / totalPlannedMins.toFloat()) * 100).toInt().coerceIn(0, 100)
+        ((routines.filter { it.isCompleted }.sumOf { it.minutes }.toFloat() / totalPlannedMins.toFloat()) * 100)
+            .toInt().coerceIn(0, 100)
 
-    // 1-MIN SWITCH WINDOW (Background lifecycle timer)
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> isAppInBackground = true
-                Lifecycle.Event.ON_RESUME -> {
-                    isAppInBackground = false
-                    backgroundGraceSeconds = 60
-                }
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    // Single Active Session Enforcement Check
-    LaunchedEffect(isLoggedIn, activeDocId) {
-        if (isLoggedIn && activeDocId.isNotBlank()) {
-            db.collection("students").document(activeDocId).get().addOnSuccessListener { document ->
-                val activeSession = document.getString("active_session")
-                val localSession = sharedPref.getString("session_id", "")
-                if (activeSession != null && localSession != null && activeSession != localSession) {
-                    isLoggedIn = false
-                    Toast.makeText(
-                        context,
-                        "Logged out: Account in use on another device",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
-        }
-    }
-
-    // Background tracking without auto-pausing
-    LaunchedEffect(isAppInBackground, activeSubject, backgroundGraceSeconds) {
-        if (isAppInBackground && activeSubject != null && backgroundGraceSeconds > 0) {
-            delay(1000L)
-            backgroundGraceSeconds -= 1
-        }
-    }
-
-    // Real-time Leaderboard Listener (Daily, Weekly, Monthly)
+    // Real-time Leaderboard Listener
     LaunchedEffect(isLoggedIn) {
         if (isLoggedIn) {
-            val todayKey = currentDayKey()
-            val weekKey = currentWeekKey()
-            val monthKey = currentMonthKey()
             db.collection("students").addSnapshotListener { snapshot, _ ->
                 if (snapshot != null) {
-                    leaderboard = snapshot.documents.map { doc ->
-                        val docDayKey = doc.getString("dayKey")
-                        val docWeekKey = doc.getString("weekKey")
-                        val docMonthKey = doc.getString("monthKey")
-                        val dailyMins = if (docDayKey == null || docDayKey == todayKey) {
-                            doc.getLong("todayMinutes")?.toInt() ?: 0
-                        } else {
-                            0
-                        }
-                        val weeklyMins = if (docWeekKey == null || docWeekKey == weekKey) {
-                            doc.getLong("weeklyMinutes")?.toInt() ?: dailyMins
-                        } else {
-                            0
-                        }
-                        val monthlyMins = if (docMonthKey == null || docMonthKey == monthKey) {
-                            doc.getLong("monthlyMinutes")?.toInt() ?: weeklyMins
-                        } else {
-                            0
-                        }
+                    val fetched = snapshot.documents.map { doc ->
                         StudentRecord(
-                            name = doc.getString("name") ?: "Student",
+                            name = doc.getString("name") ?: "Sasim",
                             uid = doc.getString("uid") ?: doc.id,
                             avatar = doc.getString("avatar") ?: "🎓",
-                            todayMinutes = dailyMins,
-                            weeklyMinutes = weeklyMins,
-                            monthlyMinutes = monthlyMins,
+                            todayMinutes = doc.getLong("todayMinutes")?.toInt() ?: 0,
+                            weeklyMinutes = doc.getLong("weeklyMinutes")?.toInt() ?: 0,
+                            monthlyMinutes = doc.getLong("monthlyMinutes")?.toInt() ?: 0,
                             completionPercent = doc.getLong("completionPercent")?.toInt() ?: 0,
                             isStudying = doc.getBoolean("isStudying") ?: false
                         )
                     }
+                    leaderboard = if (fetched.isNotEmpty()) fetched else listOf(
+                        StudentRecord(studentName.ifBlank { "Sasim" }, activeDocId, avatarPic, 0, 0, 0, 0, activeRoutine != null)
+                    )
                 }
             }
         }
     }
 
-    // Countdown Timer Loop (does not auto-pause)
-    LaunchedEffect(
-        activeSubject,
-        secondsLeft,
-        isTimerPaused
-    ) {
-        if (activeSubject != null && secondsLeft > 0 && !isTimerPaused) {
-            delay(1000L)
+    // Countdown Timer Loop
+    LaunchedEffect(activeRoutine, secondsLeft, isTimerPaused) {
+        if (activeRoutine != null && secondsLeft > 0 && !isTimerPaused) {
+            delay(1000)
             secondsLeft -= 1
-        } else if (activeSubject != null && secondsLeft == 0) {
-            val earnedMins = totalSecondsPlanned / 60
-            routines = routines.map {
-                if (it.subject == activeSubject) it.copy(isCompleted = true) else it
-            }
-            val newCompletion = ((routines.filter { it.isCompleted }.sumOf { it.minutes }
-                .toFloat() / routines.sumOf { it.minutes }.let { if (it == 0) 1 else it }) * 100)
-                .toInt()
+        } else if (activeRoutine != null && secondsLeft == 0) {
+            val finishedRoutine = activeRoutine
+            if (finishedRoutine != null) {
+                routines = routines.map {
+                    if (it.id == finishedRoutine.id) it.copy(isCompleted = true) else it
+                }
+                val newCompletion = ((routines.filter { it.isCompleted }.sumOf { it.minutes }
+                    .toFloat() / routines.sumOf { it.minutes }.let { if (it == 0) 1 else it }) * 100).toInt()
 
-            saveStudyProgress(
-                db = db,
-                docId = activeDocId,
-                studentName = studentName,
-                avatar = avatarPic,
-                minutesToAdd = earnedMins,
-                completionPercent = newCompletion,
-                isStudying = false,
-                subject = ""
-            )
-            activeSubject = null
+                saveStudyProgress(
+                    db = db,
+                    docId = activeDocId,
+                    studentName = studentName,
+                    avatar = avatarPic,
+                    minutesToAdd = finishedRoutine.minutes,
+                    completionPercent = newCompletion,
+                    isStudying = false,
+                    subject = ""
+                )
+            }
+            activeRoutine = null
             isTimerPaused = false
         }
     }
@@ -411,13 +478,14 @@ fun PadhaiPlusApp(
             LoginScreen(
                 studentNameInput = studentNameInput,
                 onStudentNameChange = { studentNameInput = it },
+                passwordInput = passwordInput,
+                onPasswordChange = { passwordInput = it },
                 isLoggingIn = isLoggingIn,
                 loginError = loginError,
                 onGoogleSignIn = {
                     val webClientId = activity.getString(R.string.default_web_client_id)
                     if (webClientId.contains("000000000000")) {
-                        loginError =
-                            "Configure your Google Web Client ID in strings.xml (from Firebase Console > Authentication > Google)."
+                        loginError = "Configure Google Web Client ID in strings.xml"
                         return@LoginScreen
                     }
                     scope.launch {
@@ -432,190 +500,70 @@ fun PadhaiPlusApp(
                             val request = GetCredentialRequest.Builder()
                                 .addCredentialOption(googleIdOption)
                                 .build()
-                            val result = credentialManager.getCredential(
-                                context = activity,
-                                request = request
-                            )
+                            val result = credentialManager.getCredential(context = activity, request = request)
                             val credential = result.credential
                             if (credential is CustomCredential &&
                                 credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
                             ) {
                                 val googleCred = GoogleIdTokenCredential.createFrom(credential.data)
-                                val firebaseCred =
-                                    GoogleAuthProvider.getCredential(googleCred.idToken, null)
+                                val firebaseCred = GoogleAuthProvider.getCredential(googleCred.idToken, null)
                                 auth.signInWithCredential(firebaseCred)
                                     .addOnSuccessListener { authResult ->
                                         val user = authResult.user
                                         val uid = user?.uid.orEmpty()
-                                        val displayName =
-                                            user?.displayName?.takeIf { it.isNotBlank() }
-                                                ?: "Student"
+                                        val displayName = user?.displayName?.takeIf { it.isNotBlank() } ?: "Sasim"
                                         val email = user?.email.orEmpty()
-                                        val docId = uid.ifBlank {
-                                            email.replace("@", "_").replace(".", "_")
-                                        }
-                                        val docRef = db.collection("students").document(docId)
-                                        docRef.get().addOnSuccessListener { doc ->
-                                            val name = if (doc.exists()) {
-                                                doc.getString("name") ?: displayName
-                                            } else {
-                                                displayName
-                                            }
-                                            val avatar = if (doc.exists()) {
-                                                doc.getString("avatar") ?: "🎓"
-                                            } else {
-                                                "🎓"
-                                            }
-                                            val updates = hashMapOf<String, Any>(
-                                                "name" to name,
-                                                "uid" to uid,
-                                                "email" to email,
-                                                "avatar" to avatar,
-                                                "isStudying" to false
-                                            )
-                                            if (!doc.exists()) {
-                                                updates["todayMinutes"] = 0
-                                                updates["weeklyMinutes"] = 0
-                                                updates["monthlyMinutes"] = 0
-                                                updates["dayKey"] = currentDayKey()
-                                                updates["weekKey"] = currentWeekKey()
-                                                updates["monthKey"] = currentMonthKey()
-                                                updates["completionPercent"] = 0
-                                            }
-                                            docRef.set(updates, SetOptions.merge())
-                                                .addOnSuccessListener {
-                                                    isLoggingIn = false
-                                                    studentName = name
-                                                    studentEmail = email
-                                                    avatarPic = avatar
-                                                    activeDocId = docId
-                                                    isLoggedIn = true
-                                                    sharedPref.edit {
-                                                        putBoolean("is_logged_in", true)
-                                                        putString("student_name", name)
-                                                        putString("student_email", email)
-                                                        putString("active_doc_id", docId)
-                                                        putString("student_avatar", avatar)
-                                                    }
-                                                }
-                                                .addOnFailureListener { e ->
-                                                    isLoggingIn = false
-                                                    loginError =
-                                                        "Firestore error: ${e.localizedMessage}"
-                                                }
-                                        }.addOnFailureListener { e ->
-                                            isLoggingIn = false
-                                            loginError = "Error: ${e.localizedMessage}"
+                                        val docId = uid.ifBlank { email.replace("@", "_").replace(".", "_") }
+                                        studentName = displayName
+                                        studentEmail = email
+                                        activeDocId = docId
+                                        isLoggedIn = true
+                                        isLoggingIn = false
+                                        sharedPref.edit {
+                                            putBoolean("is_logged_in", true)
+                                            putString("student_name", displayName)
+                                            putString("student_email", email)
+                                            putString("active_doc_id", docId)
                                         }
                                     }
                                     .addOnFailureListener { e ->
                                         isLoggingIn = false
                                         loginError = "Sign-in failed: ${e.localizedMessage}"
                                     }
-                            } else {
-                                isLoggingIn = false
-                                loginError = "Unexpected credential type."
                             }
-                        } catch (_: GetCredentialException) {
+                        } catch (_: Exception) {
                             isLoggingIn = false
-                            loginError = "Google Sign-In cancelled or unavailable."
-                        } catch (e: Exception) {
-                            isLoggingIn = false
-                            loginError = "Error: ${e.localizedMessage}"
+                            loginError = "Sign-in cancelled or unavailable."
                         }
                     }
                 },
                 onStudentIdSignIn = {
-                    val cleanName = studentNameInput.trim()
-                    if (cleanName.isNotBlank()) {
-                        isLoggingIn = true
-                        loginError = null
-                        val baseId = cleanName.lowercase()
-                            .replace(Regex("[^a-z0-9_]"), "_")
-                            .ifBlank { "student" }
-                        val docRef = db.collection("students").document(baseId)
-                        docRef.get()
-                            .addOnSuccessListener { doc ->
-                                if (doc.exists()) {
-                                    isLoggingIn = false
-                                    studentName = doc.getString("name") ?: cleanName
-                                    studentEmail = doc.getString("email").orEmpty()
-                                    avatarPic = doc.getString("avatar") ?: "🎓"
-                                    activeDocId = baseId
-                                    isLoggedIn = true
-                                    sharedPref.edit {
-                                        putBoolean("is_logged_in", true)
-                                        putString("student_name", studentName)
-                                        putString("student_email", studentEmail)
-                                        putString("active_doc_id", activeDocId)
-                                        putString("student_avatar", avatarPic)
-                                    }
-                                } else {
-                                    val updates = hashMapOf<String, Any>(
-                                        "name" to cleanName,
-                                        "uid" to baseId,
-                                        "avatar" to avatarPic,
-                                        "isStudying" to false,
-                                        "todayMinutes" to 0,
-                                        "weeklyMinutes" to 0,
-                                        "monthlyMinutes" to 0,
-                                        "dayKey" to currentDayKey(),
-                                        "weekKey" to currentWeekKey(),
-                                        "monthKey" to currentMonthKey(),
-                                        "completionPercent" to 0
-                                    )
-                                    docRef.set(updates, SetOptions.merge())
-                                        .addOnSuccessListener {
-                                            isLoggingIn = false
-                                            studentName = cleanName
-                                            studentEmail = ""
-                                            activeDocId = baseId
-                                            isLoggedIn = true
-                                            sharedPref.edit {
-                                                putBoolean("is_logged_in", true)
-                                                putString("student_name", cleanName)
-                                                putString("student_email", "")
-                                                putString("active_doc_id", baseId)
-                                                putString("student_avatar", avatarPic)
-                                            }
-                                        }
-                                        .addOnFailureListener { e ->
-                                            isLoggingIn = false
-                                            loginError = "Error: ${e.localizedMessage}"
-                                        }
-                                }
-                            }
-                            .addOnFailureListener { e ->
-                                val isOffline = e is FirebaseFirestoreException &&
-                                        e.code == FirebaseFirestoreException.Code.UNAVAILABLE
-                                if (isOffline) {
-                                    docRef.get(Source.CACHE)
-                                        .addOnSuccessListener { cachedDoc ->
-                                            isLoggingIn = false
-                                            if (cachedDoc.exists()) {
-                                                studentName =
-                                                    cachedDoc.getString("name") ?: cleanName
-                                                studentEmail =
-                                                    cachedDoc.getString("email").orEmpty()
-                                                avatarPic = cachedDoc.getString("avatar") ?: "🎓"
-                                                activeDocId = baseId
-                                                isLoggedIn = true
-                                            } else {
-                                                loginError =
-                                                    "Offline: cannot create new ID without internet."
-                                            }
-                                        }.addOnFailureListener {
-                                            isLoggingIn = false
-                                            loginError = "Offline. Check internet connection."
-                                        }
-                                } else {
-                                    isLoggingIn = false
-                                    loginError = "Connection error: ${e.localizedMessage}"
-                                }
-                            }
-                    } else {
-                        loginError = "Please enter your Student Name or ID"
+                    val cleanName = studentNameInput.trim().ifBlank { "Sasim" }
+                    isLoggingIn = true
+                    studentName = cleanName
+                    activeDocId = cleanName.lowercase().replace(Regex("[^a-z0-9_]"), "_")
+                    isLoggedIn = true
+                    isLoggingIn = false
+                    sharedPref.edit {
+                        putBoolean("is_logged_in", true)
+                        putString("student_name", cleanName)
+                        putString("active_doc_id", activeDocId)
                     }
+                }
+            )
+            return@PastelBlobBackground
+        }
+
+        // Full Screen "Study Time!!" when a class session is active
+        if (activeRoutine != null) {
+            StudyTimeScreen(
+                secondsLeft = secondsLeft,
+                isFaceDetected = isFaceDetected,
+                isBannerDismissed = isBannerDismissed,
+                onFacePresenceChanged = { isFaceDetected = it },
+                onDismissBanner = { isBannerDismissed = true },
+                onBack = {
+                    activeRoutine = null
                 }
             )
             return@PastelBlobBackground
@@ -644,96 +592,78 @@ fun PadhaiPlusApp(
                 when (selectedSection) {
                     0 -> RoutineDashboardSection(
                         studentName = studentName,
-                        avatarPic = avatarPic,
-                        currentTheme = currentTheme,
                         routines = routines,
-                        totalPlannedMins = totalPlannedMins,
-                        todayStudiedMinutes = myTodayStudiedMinutes,
                         completionPercent = completionPercent,
-                        is24HourFormat = is24HourFormat,
-                        onToggle24HourFormat = { is24HourFormat = it },
-                        activeSubject = activeSubject,
-                        secondsLeft = secondsLeft,
-                        isTimerPaused = isTimerPaused,
-                        isFaceDetected = isFaceDetected,
-                        isFaceDetectionEnabled = isFaceDetectionEnabled,
-                        isAppInBackground = isAppInBackground,
-                        backgroundGraceSeconds = backgroundGraceSeconds,
-                        onFacePresenceChanged = { isFaceDetected = it },
-                        onTogglePause = { isTimerPaused = !isTimerPaused },
-                        onFinishTimer = {
-                            val studiedSeconds = totalSecondsPlanned - secondsLeft
-                            val earnedMins = studiedSeconds / 60
-                            routines = routines.map {
-                                if (it.subject == activeSubject) it.copy(isCompleted = true) else it
-                            }
-                            val newCompletion =
-                                ((routines.filter { it.isCompleted }.sumOf { it.minutes }
-                                    .toFloat() / routines.sumOf { it.minutes }
-                                    .let { if (it == 0) 1 else it }) * 100).toInt()
-
-                            saveStudyProgress(
-                                db = db,
-                                docId = activeDocId,
-                                studentName = studentName,
-                                avatar = avatarPic,
-                                minutesToAdd = earnedMins,
-                                completionPercent = newCompletion,
-                                isStudying = false,
-                                subject = ""
-                            )
-                            activeSubject = null
-                            isTimerPaused = false
-                        },
                         onOpenProfile = { showProfileDialog = true },
-                        onOpenAddSubject = { showAddSubjectSheet = true },
-                        onToggleAlarm = { item, enabled ->
-                            routines = routines.map {
-                                if (it.id == item.id) it.copy(isEnabled = enabled) else it
-                            }
-                            if (enabled) {
-                                AlarmScheduler.scheduleAlarm(
-                                    context,
-                                    item.id,
-                                    item.subject,
-                                    item.hour,
-                                    item.minute
-                                )
-                            } else {
-                                AlarmScheduler.cancelAlarm(context, item.id)
-                            }
+                        onOpenAddSubject = {
+                            editingRoutine = null
+                            subjectInput = ""
+                            startTimeInput = "08:00"
+                            endTimeInput = "09:30"
+                            showAddSubjectSheet = true
+                        },
+                        onEditRoutine = { item ->
+                            editingRoutine = item
+                            subjectInput = item.subject
+                            startTimeInput = item.startTime
+                            endTimeInput = item.endTime
+                            showAddSubjectSheet = true
+                        },
+                        onDeleteRoutine = { item ->
+                            routines = routines.filter { it.id != item.id }
                         },
                         onStartRoutine = { item ->
-                            activeSubject = item.subject
-                            totalSecondsPlanned = item.minutes * 60
-                            secondsLeft = item.minutes * 60
+                            activeRoutine = item
+                            secondsLeft = 2700
                             isTimerPaused = false
-                            saveStudyProgress(
-                                db = db,
-                                docId = activeDocId,
-                                studentName = studentName,
-                                avatar = avatarPic,
-                                minutesToAdd = 0,
-                                completionPercent = completionPercent,
-                                isStudying = true,
-                                subject = item.subject
-                            )
-                        },
-                        onEditRoutineAlarm = { item -> editingRoutine = item }
+                            isBannerDismissed = false
+                        }
                     )
 
-                    1 -> NepaliCalendarSection(
+                    1 -> CalendarSection(
                         routines = routines,
-                        todayStudiedMinutes = myTodayStudiedMinutes,
-                        completionPercent = completionPercent
+                        onStartRoutine = { item ->
+                            activeRoutine = item
+                            secondsLeft = 2700
+                            isTimerPaused = false
+                            isBannerDismissed = false
+                        }
                     )
 
-                    2 -> LeaderboardSection(leaderboard = leaderboard)
+                    2 -> LeaderboardSection(
+                        studentName = studentName,
+                    )
+
+                    3 -> {
+                        if (showThemeSelectionScreen) {
+                            ThemeSelectionScreen(
+                                currentTheme = currentTheme,
+                                themeMode = themeMode,
+                                onSelectTheme = onSelectTheme,
+                                onSelectThemeMode = onSelectThemeMode,
+                                onBack = { showThemeSelectionScreen = false }
+                            )
+                        } else {
+                            SettingsSection(
+                                studentName = studentName,
+                                themeMode = themeMode,
+                                onOpenProfile = { showProfileDialog = true },
+                                onOpenThemeSelection = { showThemeSelectionScreen = true },
+                                onLogOut = {
+                                    auth.signOut()
+                                    isLoggedIn = false
+                                    studentName = "Sasim"
+                                    activeDocId = ""
+                                    sharedPref.edit { putBoolean("is_logged_in", false) }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        // Add Subject Modal Bottom Sheet (Hour & Minute only)
+        // Add / Edit Subject Modal Bottom Sheet
         if (showAddSubjectSheet) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(
@@ -743,53 +673,61 @@ fun PadhaiPlusApp(
                 shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
             ) {
                 AddSubjectSheetContent(
+                    isEditing = editingRoutine != null,
                     subjectInput = subjectInput,
                     onSubjectChange = { subjectInput = it },
-                    hourInput = hourInput,
-                    onHourChange = { hourInput = it },
-                    minuteInput = minuteInput,
-                    onMinuteChange = { minuteInput = it },
-                    selectedColorIndex = selectedColorIndex,
-                    onSelectColor = { selectedColorIndex = it },
+                    startTimeInput = startTimeInput,
+                    onStartTimeChange = { startTimeInput = it },
+                    endTimeInput = endTimeInput,
+                    onEndTimeChange = { endTimeInput = it },
                     onSave = {
-                        val hr = hourInput.toIntOrNull().let {
-                            if (it != null && it in 0..23) it else 8
-                        }
-                        val min = minuteInput.toIntOrNull().let {
-                            if (it != null && it in 0..59) it else 0
-                        }
                         if (subjectInput.isNotBlank()) {
-                            val newRoutine = RoutineItem(
-                                subject = subjectInput.trim(),
-                                minutes = 60,
-                                hour = hr,
-                                minute = min,
-                                isEnabled = true,
-                                colorIndex = selectedColorIndex
-                            )
-                            routines = routines + newRoutine
-                            AlarmScheduler.scheduleAlarm(
-                                context,
-                                newRoutine.id,
-                                newRoutine.subject,
-                                newRoutine.hour,
-                                newRoutine.minute
-                            )
+                            val currentEditing = editingRoutine
+                            if (currentEditing != null) {
+                                // Edit existing
+                                routines = routines.map {
+                                    if (it.id == currentEditing.id) {
+                                        it.copy(
+                                            subject = subjectInput.trim(),
+                                            startTime = startTimeInput.ifBlank { "08:00" },
+                                            endTime = endTimeInput.ifBlank { "09:30" }
+                                        )
+                                    } else it
+                                }
+                            } else {
+                                // Add new
+                                val newRoutine = RoutineItem(
+                                    subject = subjectInput.trim(),
+                                    startTime = startTimeInput.ifBlank { "08:00" },
+                                    endTime = endTimeInput.ifBlank { "09:30" },
+                                    minutes = 90,
+                                    hour = 8,
+                                    minute = 0,
+                                    isEnabled = true,
+                                    colorIndex = (0..5).random()
+                                )
+                                routines = routines + newRoutine
+                            }
                             subjectInput = ""
+                            editingRoutine = null
                             showAddSubjectSheet = false
                         } else {
-                            Toast.makeText(
-                                context,
-                                "Please enter a subject name",
-                                Toast.LENGTH_SHORT
-                            ).show()
+                            Toast.makeText(context, "Please enter a subject name", Toast.LENGTH_SHORT).show()
                         }
+                    },
+                    onDelete = {
+                        val currentEditing = editingRoutine
+                        if (currentEditing != null) {
+                            routines = routines.filter { it.id != currentEditing.id }
+                        }
+                        editingRoutine = null
+                        showAddSubjectSheet = false
                     }
                 )
             }
         }
 
-        // Profile & Theme Personalization Dialog
+        // Profile Dialog
         if (showProfileDialog) {
             ProfileDialog(
                 studentName = studentName,
@@ -797,80 +735,36 @@ fun PadhaiPlusApp(
                 currentAvatar = avatarPic,
                 todayMinutes = myTodayStudiedMinutes,
                 completionPercent = completionPercent,
-                currentTheme = currentTheme,
-                onSelectTheme = onSelectTheme,
                 onSignOut = {
                     showProfileDialog = false
                     auth.signOut()
-                    scope.launch {
-                        runCatching {
-                            credentialManager.clearCredentialState(ClearCredentialStateRequest())
-                        }
-                    }
-                    activeSubject = null
-                    isTimerPaused = false
-                    studentName = ""
-                    studentEmail = ""
-                    activeDocId = ""
                     isLoggedIn = false
-                    sharedPref.edit {
-                        putBoolean("is_logged_in", false)
-                        putString("student_name", "")
-                        putString("student_email", "")
-                        putString("active_doc_id", "")
-                    }
+                    sharedPref.edit { putBoolean("is_logged_in", false) }
                 },
                 onDismiss = { showProfileDialog = false },
                 onSaveAvatar = { newAvatar ->
                     avatarPic = newAvatar
                     sharedPref.edit { putString("student_avatar", newAvatar) }
-                    saveStudyProgress(
-                        db = db,
-                        docId = activeDocId,
-                        studentName = studentName,
-                        avatar = newAvatar,
-                        minutesToAdd = 0,
-                        completionPercent = completionPercent,
-                        isStudying = activeSubject != null,
-                        subject = activeSubject ?: ""
-                    )
-                }
-            )
-        }
-
-        // Interactive Time Adjuster Dialog
-        editingRoutine?.let { routine ->
-            InteractiveAlarmAdjusterDialog(
-                routine = routine,
-                onDismiss = { editingRoutine = null },
-                onSave = { updated ->
-                    routines = routines.map { if (it.id == updated.id) updated else it }
-                    if (updated.isEnabled) {
-                        AlarmScheduler.scheduleAlarm(
-                            context,
-                            updated.id,
-                            updated.subject,
-                            updated.hour,
-                            updated.minute
-                        )
-                    }
-                    editingRoutine = null
                 }
             )
         }
     }
 }
 
+// ------------------- SCREEN 1: LOGIN SCREEN -------------------
 @Composable
 fun LoginScreen(
     studentNameInput: String,
     onStudentNameChange: (String) -> Unit,
+    passwordInput: String,
+    onPasswordChange: (String) -> Unit,
     isLoggingIn: Boolean,
     loginError: String?,
     onGoogleSignIn: () -> Unit,
     onStudentIdSignIn: () -> Unit,
 ) {
     val theme = LocalAppTheme.current
+    var isPasswordVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -882,23 +776,15 @@ fun LoginScreen(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Box(
-            modifier = Modifier
-                .size(68.dp)
-                .shadow(10.dp, RoundedCornerShape(20.dp))
-                .clip(RoundedCornerShape(20.dp))
-                .background(Color(0xFF19223B)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("🎓", fontSize = 34.sp)
-        }
+        // App Icon Logo (Stopwatch on open book)
+        PadhaiPlusAppLogo(modifier = Modifier.size(76.dp))
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
         Text(
             "PadhaiPLUS+",
-            fontSize = 34.sp,
+            fontSize = 32.sp,
             fontWeight = FontWeight.ExtraBold,
-            color = theme.primary
+            color = theme.textPrimary
         )
         Spacer(Modifier.height(4.dp))
         Text(
@@ -910,10 +796,11 @@ fun LoginScreen(
 
         Spacer(Modifier.height(28.dp))
 
+        // White Sign-in Card
         Surface(
             shape = RoundedCornerShape(28.dp),
             color = theme.cardSurface,
-            shadowElevation = 10.dp,
+            shadowElevation = 8.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
@@ -925,72 +812,12 @@ fun LoginScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Sign in with your Google account to sync your progress",
+                    "Sign in to continue to your dashboard",
                     fontSize = 13.sp,
                     color = theme.textSecondary
                 )
 
                 Spacer(Modifier.height(20.dp))
-
-                // Primary Google Sign-In Button
-                Button(
-                    enabled = !isLoggingIn,
-                    onClick = onGoogleSignIn,
-                    shape = RoundedCornerShape(50),
-                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .shadow(8.dp, RoundedCornerShape(50))
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .background(Color.White),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "G",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = theme.primary
-                            )
-                        }
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            if (isLoggingIn) "Signing in..." else "Continue with Google",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(18.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = theme.borderAccent.copy(alpha = 0.25f)
-                    )
-                    Text(
-                        "  or continue with Student ID  ",
-                        fontSize = 12.sp,
-                        color = theme.textSecondary
-                    )
-                    HorizontalDivider(
-                        modifier = Modifier.weight(1f),
-                        color = theme.borderAccent.copy(alpha = 0.25f)
-                    )
-                }
-                Spacer(Modifier.height(16.dp))
 
                 Text(
                     "Student name or ID",
@@ -1002,17 +829,11 @@ fun LoginScreen(
                 OutlinedTextField(
                     value = studentNameInput,
                     onValueChange = onStudentNameChange,
-                    placeholder = {
-                        Text(
-                            "Enter student name or ID",
-                            color = theme.textSecondary.copy(alpha = 0.6f)
-                        )
-                    },
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = theme.primary,
-                        unfocusedBorderColor = theme.borderAccent.copy(alpha = 0.4f),
+                        unfocusedBorderColor = theme.borderAccent,
                         focusedContainerColor = theme.cardSurface,
                         unfocusedContainerColor = theme.cardSurface,
                         focusedTextColor = theme.textPrimary,
@@ -1022,28 +843,94 @@ fun LoginScreen(
                 )
 
                 Spacer(Modifier.height(14.dp))
-                OutlinedButton(
-                    enabled = !isLoggingIn,
+                Text(
+                    "Password",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = theme.textPrimary
+                )
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = passwordInput,
+                    onValueChange = onPasswordChange,
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        Text(
+                            text = if (isPasswordVisible) "👁️" else "👁️‍🗨️",
+                            fontSize = 16.sp,
+                            modifier = Modifier
+                                .clickable { isPasswordVisible = !isPasswordVisible }
+                                .padding(8.dp)
+                        )
+                    },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = theme.primary,
+                        unfocusedBorderColor = theme.borderAccent,
+                        focusedContainerColor = theme.cardSurface,
+                        unfocusedContainerColor = theme.cardSurface,
+                        focusedTextColor = theme.textPrimary,
+                        unfocusedTextColor = theme.textPrimary,
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Forgot password?",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = theme.primary,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                Button(
                     onClick = onStudentIdSignIn,
+                    shape = RoundedCornerShape(50),
+                    colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .shadow(4.dp, RoundedCornerShape(50))
+                ) {
+                    Text(
+                        if (isLoggingIn) "Signing in..." else "Sign in",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                OutlinedButton(
+                    onClick = onGoogleSignIn,
                     shape = RoundedCornerShape(50),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
                 ) {
-                    Text(
-                        "Sign in with ID",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = theme.primary
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🌐 ", fontSize = 14.sp)
+                        Text(
+                            "Continue with Google",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.primary
+                        )
+                    }
                 }
 
                 if (!loginError.isNullOrBlank()) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     Text(
                         text = loginError,
                         fontSize = 12.sp,
-                        color = Color(0xFFD32F2F),
+                        color = Color(0xFFEF4444),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -1051,7 +938,19 @@ fun LoginScreen(
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
+        Row {
+            Text("New student? ", fontSize = 13.sp, color = theme.textSecondary)
+            Text(
+                "Create account",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = theme.primary,
+                modifier = Modifier.clickable { onStudentIdSignIn() }
+            )
+        }
+
+        Spacer(Modifier.height(28.dp))
         Text(
             "Your progress is saved securely",
             fontSize = 12.sp,
@@ -1060,445 +959,278 @@ fun LoginScreen(
     }
 }
 
-@Composable
-fun FloatingPillBottomBar(
-    selectedSection: Int,
-    onSelectSection: (Int) -> Unit,
-) {
-    val theme = LocalAppTheme.current
-    val items = listOf("Routines", "Calendar", "Leaderboard")
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 12.dp)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = theme.cardSurface,
-            shadowElevation = 10.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                items.forEachIndexed { index, label ->
-                    val selected = selectedSection == index
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(50))
-                            .background(if (selected) theme.navSelectedBg else Color.Transparent)
-                            .clickable { onSelectSection(index) }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = label,
-                            fontSize = 14.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) theme.primary else theme.textSecondary
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
+// ------------------- SCREEN 2: ROUTINES / DASHBOARD -------------------
 @Composable
 fun RoutineDashboardSection(
     studentName: String,
-    avatarPic: String,
-    currentTheme: AppThemeStyle,
     routines: List<RoutineItem>,
-    totalPlannedMins: Int,
-    todayStudiedMinutes: Int,
     completionPercent: Int,
-    is24HourFormat: Boolean,
-    onToggle24HourFormat: (Boolean) -> Unit,
-    activeSubject: String?,
-    secondsLeft: Int,
-    isTimerPaused: Boolean,
-    isFaceDetected: Boolean,
-    isFaceDetectionEnabled: Boolean,
-    isAppInBackground: Boolean,
-    backgroundGraceSeconds: Int,
-    onFacePresenceChanged: (Boolean) -> Unit,
-    onTogglePause: () -> Unit,
-    onFinishTimer: () -> Unit,
     onOpenProfile: () -> Unit,
     onOpenAddSubject: () -> Unit,
-    onToggleAlarm: (RoutineItem, Boolean) -> Unit,
+    onEditRoutine: (RoutineItem) -> Unit,
+    onDeleteRoutine: (RoutineItem) -> Unit,
     onStartRoutine: (RoutineItem) -> Unit,
-    onEditRoutineAlarm: (RoutineItem) -> Unit,
 ) {
     val theme = LocalAppTheme.current
-    val todayNepali = remember { NepaliCalendarUtils.getCurrentNepaliDate() }
+    val todayDateFormatted = remember {
+        SimpleDateFormat("EEEE, MMMM d", Locale.US).format(Date())
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .padding(bottom = 20.dp)
     ) {
-        // 1. Top Profile & Theme Pill Card
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = theme.cardSurface,
-            shadowElevation = 4.dp,
+        // Top Bar
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.5.dp, theme.borderAccent, RoundedCornerShape(50))
-                .clip(RoundedCornerShape(50))
-                .clickable { onOpenProfile() }
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                    .clip(RoundedCornerShape(50))
+                    .clickable { onOpenProfile() }
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE2F1E8)),
+                    contentAlignment = Alignment.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(theme.softContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(avatarPic, fontSize = 22.sp)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column {
+                    Text("🎓", fontSize = 24.sp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        studentName,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.textPrimary
+                    )
+                    Text(
+                        "Tap for profile & stats ⚙️",
+                        fontSize = 12.sp,
+                        color = theme.textSecondary
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clickable { onOpenProfile() }
+                    .padding(8.dp)
+            ) {
+                Text(
+                    "More ",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = theme.textSecondary
+                )
+                Text(
+                    "›",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = theme.textSecondary
+                )
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Greeting Card
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = Color(0xFFD7F0E5),
+            shadowElevation = 0.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            studentName,
-                            fontSize = 17.sp,
+                            "Good morning,\n$studentName ☀️",
+                            fontSize = 26.sp,
                             fontWeight = FontWeight.Bold,
-                            color = theme.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            color = Color(0xFF194236),
+                            lineHeight = 32.sp
                         )
+                        Spacer(Modifier.height(8.dp))
                         Text(
-                            "Tap for profile & themes ⚙️",
-                            fontSize = 12.sp,
-                            color = theme.primary,
+                            "$todayDateFormatted · ${routines.size} classes today",
+                            fontSize = 13.sp,
+                            color = Color(0xFF2C5E4F),
                             fontWeight = FontWeight.Medium
                         )
                     }
+
+                    Box(
+                        modifier = Modifier.size(90.dp, 70.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            drawCircle(
+                                color = Color(0xFFFBBF24),
+                                radius = 12f,
+                                center = Offset(size.width * 0.8f, size.height * 0.25f)
+                            )
+                            for (i in 0 until 8) {
+                                val angle = i * 45 * Math.PI / 180
+                                val startX = (size.width * 0.8f + 16 * Math.cos(angle)).toFloat()
+                                val startY = (size.height * 0.25f + 16 * Math.sin(angle)).toFloat()
+                                val endX = (size.width * 0.8f + 22 * Math.cos(angle)).toFloat()
+                                val endY = (size.height * 0.25f + 22 * Math.sin(angle)).toFloat()
+                                drawLine(
+                                    color = Color(0xFFFBBF24),
+                                    start = Offset(startX, startY),
+                                    end = Offset(endX, endY),
+                                    strokeWidth = 3f
+                                )
+                            }
+                            val leftPage = Path().apply {
+                                moveTo(size.width * 0.48f, size.height * 0.45f)
+                                cubicTo(
+                                    size.width * 0.35f, size.height * 0.35f,
+                                    size.width * 0.15f, size.height * 0.4f,
+                                    size.width * 0.05f, size.height * 0.45f
+                                )
+                                lineTo(size.width * 0.05f, size.height * 0.85f)
+                                cubicTo(
+                                    size.width * 0.15f, size.height * 0.8f,
+                                    size.width * 0.35f, size.height * 0.75f,
+                                    size.width * 0.48f, size.height * 0.88f
+                                )
+                                close()
+                            }
+                            drawPath(leftPage, color = Color.White)
+                            drawPath(leftPage, color = Color(0xFFF97316), style = Stroke(width = 3f))
+
+                            val rightPage = Path().apply {
+                                moveTo(size.width * 0.52f, size.height * 0.45f)
+                                cubicTo(
+                                    size.width * 0.65f, size.height * 0.35f,
+                                    size.width * 0.85f, size.height * 0.4f,
+                                    size.width * 0.95f, size.height * 0.45f
+                                )
+                                lineTo(size.width * 0.95f, size.height * 0.85f)
+                                cubicTo(
+                                    size.width * 0.85f, size.height * 0.8f,
+                                    size.width * 0.65f, size.height * 0.75f,
+                                    size.width * 0.52f, size.height * 0.88f
+                                )
+                                close()
+                            }
+                            drawPath(rightPage, color = Color.White)
+                            drawPath(rightPage, color = Color(0xFFF97316), style = Stroke(width = 3f))
+                        }
+                    }
                 }
+
+                Spacer(Modifier.height(24.dp))
+
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(theme.softContainer)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "${currentTheme.emoji} ${currentTheme.displayName}",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = theme.primary
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("›", fontSize = 14.sp, color = theme.primary, fontWeight = FontWeight.Bold)
+                    Text("Today's progress", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF194236))
+                    Text("$completionPercent% done", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF194236))
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White)
+                ) {
+                    val progressFraction = (completionPercent / 100f).coerceIn(0f, 1f)
+                    if (progressFraction > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(progressFraction)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(Color(0xFF2D6A4F))
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
 
-        // 2. Add Subject Pill Card
+        // "Add subject" Pill Card
         Surface(
             shape = RoundedCornerShape(50),
-            color = theme.cardSurface,
-            shadowElevation = 4.dp,
+            color = Color(0xFFFFF2E6),
+            shadowElevation = 0.dp,
             modifier = Modifier
                 .fillMaxWidth()
-                .border(1.5.dp, theme.borderAccent, RoundedCornerShape(50))
+                .border(1.dp, Color(0xFFFDE8D3), RoundedCornerShape(50))
                 .clip(RoundedCornerShape(50))
                 .clickable { onOpenAddSubject() }
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
-                            .background(theme.softContainer),
+                            .background(Color(0xFFE8DFF5)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text("📖", fontSize = 22.sp)
+                        Text("🎓", fontSize = 22.sp)
                     }
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(14.dp))
                     Column {
-                        Text(
-                            "Add subject",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.textPrimary
-                        )
-                        Text(
-                            "Tap here to add subject",
-                            fontSize = 12.sp,
-                            color = theme.primary
-                        )
-                    }
-                }
-                Text(
-                    "›",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = theme.primary,
-                    modifier = Modifier.padding(end = 6.dp)
-                )
-            }
-        }
-
-        Spacer(Modifier.height(12.dp))
-
-        // Planned vs Actual Study Time Card
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = theme.cardSurface,
-            shadowElevation = 4.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    "⏱️ Study Time: Planned vs Actual",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = theme.textPrimary
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text("Wanted to study", fontSize = 12.sp, color = theme.textSecondary)
-                        Text("$totalPlannedMins mins", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.primary)
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text("Actually studied", fontSize = 12.sp, color = theme.textSecondary)
-                        Text("$todayStudiedMinutes mins", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
-                    }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(18.dp))
-
-        // 3. Greeting & Today's Progress Card
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = theme.softContainer,
-            shadowElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(18.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "${NepaliCalendarUtils.getGreetingTitle(studentName)} ☀️",
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.textPrimary
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${todayNepali.dayOfWeekName}, ${todayNepali.monthName} ${todayNepali.day} · ${routines.size} classes today",
-                            fontSize = 13.sp,
-                            color = theme.textSecondary
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(theme.cardSurface.copy(alpha = 0.7f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("📚", fontSize = 28.sp)
+                        Text("Add subject", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF2D253B))
+                        Text("Tap Here to add subject", fontSize = 12.sp, color = Color(0xFF7C6E8F))
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    "Today's progress",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = theme.primary
-                )
-                Spacer(Modifier.height(6.dp))
-
-                RoundedPillProgressBar(
-                    progress = completionPercent / 100f,
-                    fillColor = theme.primary,
-                    trackColor = theme.cardSurface,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(12.dp)
-                )
-
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "$completionPercent% done",
-                    fontSize = 12.sp,
-                    color = theme.textSecondary,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-
-        // 4. Active Timer Card (if studying)
-        if (activeSubject != null) {
-            Spacer(Modifier.height(14.dp))
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = theme.cardSurface,
-                shadowElevation = 8.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(
-                        width = 1.5.dp,
-                        color = if (isTimerPaused || !isFaceDetected) Color(0xFFE57373) else theme.primary,
-                        shape = RoundedCornerShape(24.dp)
-                    )
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        when {
-                            !isFaceDetected && isFaceDetectionEnabled ->
-                                "⚠️ NO FACE DETECTED (Auto-Resumes)"
-                            isAppInBackground ->
-                                "⏱️ Switch Grace Window: ${backgroundGraceSeconds}s"
-                            isTimerPaused -> "⏸️ TIMER PAUSED"
-                            else -> "🟢 LIVE STUDYING: $activeSubject"
-                        },
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = theme.textPrimary
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    val mins = secondsLeft / 60
-                    val secs = secondsLeft % 60
-                    Text(
-                        String.format(Locale.US, "%02d:%02d", mins, secs),
-                        fontSize = 36.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = theme.primary
-                    )
-
-                    if (isFaceDetectionEnabled) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(vertical = 6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(44.dp)
-                                    .clip(CircleShape)
-                            ) {
-                                FaceDetectionCameraPreview(
-                                    onFacePresenceChanged = onFacePresenceChanged,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            }
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                if (isFaceDetected) "👤 Face Detected (Active)"
-                                else "❌ Face Away! Auto-resumes on return",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isFaceDetected) Color(0xFF2E7D32) else Color(0xFFD32F2F)
-                            )
-                        }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button(
-                            onClick = onTogglePause,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(containerColor = theme.primary)
-                        ) {
-                            Text(if (isTimerPaused) "Resume" else "Pause")
-                        }
-                        Button(
-                            onClick = onFinishTimer,
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
-                        ) {
-                            Text("Finish & Save")
-                        }
-                    }
-                }
+                Text("›", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4A3E59), modifier = Modifier.padding(end = 8.dp))
             }
         }
 
         Spacer(Modifier.height(20.dp))
 
-        // 5. Today's Schedule Header + 12/24 Hr Toggle
+        // "Today's Schedule:" Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                "Today's Schedule:",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp,
-                color = theme.textPrimary
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(theme.cardSurface)
-                    .clickable { onToggle24HourFormat(!is24HourFormat) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Text(
-                    if (is24HourFormat) "24-Hr" else "12-Hr",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = theme.primary
-                )
-            }
+            Text("Today's Schedule:", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = theme.textPrimary)
+            Text("${routines.size} classes", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = theme.textSecondary)
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
 
+        // Empty state if no classes added yet
         if (routines.isEmpty()) {
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = theme.cardSurface,
-                shadowElevation = 4.dp,
+                shadowElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
@@ -1507,17 +1239,17 @@ fun RoutineDashboardSection(
                         .padding(28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text("📅", fontSize = 32.sp)
+                    Text("📅", fontSize = 36.sp)
                     Spacer(Modifier.height(8.dp))
                     Text(
                         "No classes added yet",
-                        fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
                         color = theme.textPrimary
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Tap \"Add subject\" above to schedule your first class.",
+                        "Tap \"Add subject\" above to create your schedule.",
                         fontSize = 13.sp,
                         color = theme.textSecondary,
                         textAlign = TextAlign.Center
@@ -1525,438 +1257,136 @@ fun RoutineDashboardSection(
                 }
             }
         } else {
-            routines.forEach { item ->
-                val swatchColor =
-                    SubjectSwatchColors[item.colorIndex.coerceIn(0, SubjectSwatchColors.lastIndex)]
-                val swatchIcon =
-                    SubjectSwatchIcons[item.colorIndex.coerceIn(0, SubjectSwatchIcons.lastIndex)]
-
-                val timeFormatted = if (is24HourFormat) {
-                    String.format(Locale.US, "%02d:%02d", item.hour, item.minute)
-                } else {
-                    formatTime12Hr(item.hour, item.minute)
+            // Routine Items List with Edit & Delete Actions
+            routines.forEachIndexed { index, item ->
+                val iconBg = when (index % 3) {
+                    0 -> Color(0xFFDFF2EC)
+                    1 -> Color(0xFFE5F5D9)
+                    else -> Color(0xFFFBE4D8)
+                }
+                val itemIcon = when (item.subject.lowercase()) {
+                    "mathematics", "math" -> "📐"
+                    "physics" -> "🧪"
+                    "english literature", "english" -> "📖"
+                    else -> SubjectSwatchIcons[item.colorIndex.coerceIn(0, SubjectSwatchIcons.lastIndex)]
                 }
 
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = theme.cardSurface,
-                    shadowElevation = 5.dp,
+                    shadowElevation = 2.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 6.dp)
+                        .clip(RoundedCornerShape(24.dp))
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Click icon box or text to start routine
                         Box(
                             modifier = Modifier
                                 .size(54.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(swatchColor),
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(iconBg)
+                                .clickable { onStartRoutine(item) },
                             contentAlignment = Alignment.Center
                         ) {
-                            Text(swatchIcon, fontSize = 24.sp)
+                            Text(itemIcon, fontSize = 26.sp)
                         }
 
-                        Spacer(Modifier.width(14.dp))
+                        Spacer(Modifier.width(16.dp))
 
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { onStartRoutine(item) }
+                        ) {
                             Text(
-                                timeFormatted,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
+                                "${item.startTime} - ${item.endTime}",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
                                 color = theme.textSecondary
                             )
                             Spacer(Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    item.subject,
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = theme.textPrimary
-                                )
-                                if (item.isCompleted) {
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("✅", fontSize = 14.sp)
-                                }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(50))
-                                    .background(theme.trackBg)
-                                    .clickable { onEditRoutineAlarm(item) }
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    "⏰ Adjust time",
-                                    fontSize = 11.sp,
-                                    color = theme.primary,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
-
-                        Column(horizontalAlignment = Alignment.End) {
-                            Switch(
-                                checked = item.isEnabled,
-                                onCheckedChange = { enabled -> onToggleAlarm(item, enabled) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = theme.primary
-                                )
+                            Text(
+                                item.subject,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = theme.textPrimary
                             )
-                            Spacer(Modifier.height(4.dp))
-                            Button(
-                                enabled = activeSubject == null && !item.isCompleted,
-                                onClick = { onStartRoutine(item) },
-                                shape = RoundedCornerShape(50),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = theme.primary,
-                                    disabledContainerColor = theme.softContainer
-                                ),
-                                modifier = Modifier.height(32.dp)
-                            ) {
-                                Text(
-                                    if (item.isCompleted) "Done" else "Start",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (item.isCompleted) theme.primary else Color.White
-                                )
-                            }
                         }
-                    }
-                }
-            }
-        }
 
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-@Composable
-fun AddSubjectSheetContent(
-    subjectInput: String,
-    onSubjectChange: (String) -> Unit,
-    hourInput: String,
-    onHourChange: (String) -> Unit,
-    minuteInput: String,
-    onMinuteChange: (String) -> Unit,
-    selectedColorIndex: Int,
-    onSelectColor: (Int) -> Unit,
-    onSave: () -> Unit,
-) {
-    val theme = LocalAppTheme.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp)
-            .padding(bottom = 28.dp)
-    ) {
-        Text(
-            "Add Subject:",
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = theme.textPrimary
-        )
-        Spacer(Modifier.height(14.dp))
-
-        Text(
-            "Subject name",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = theme.textPrimary
-        )
-        Spacer(Modifier.height(6.dp))
-        OutlinedTextField(
-            value = subjectInput,
-            onValueChange = onSubjectChange,
-            placeholder = {
-                Text("Enter subject name", color = theme.textSecondary.copy(alpha = 0.6f))
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(16.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = theme.primary,
-                unfocusedBorderColor = theme.borderAccent.copy(alpha = 0.3f),
-                focusedContainerColor = theme.trackBg,
-                unfocusedContainerColor = theme.trackBg,
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(Modifier.height(14.dp))
-        Text(
-            "Hour (O' Clock - 0 to 23):",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = theme.textPrimary
-        )
-        Spacer(Modifier.height(6.dp))
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(24) { h ->
-                val isSelected = hourInput.toIntOrNull() == h
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) theme.primary else theme.trackBg,
-                    modifier = Modifier
-                        .clickable { onHourChange(h.toString()) }
-                        .padding(vertical = 4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                        // Edit Button
                         Text(
-                            String.format(Locale.US, "%02d", h),
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else theme.textPrimary
+                            "✏️",
+                            fontSize = 16.sp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onEditRoutine(item) }
+                                .padding(8.dp)
                         )
-                    }
-                }
-            }
-        }
 
-        Spacer(Modifier.height(14.dp))
-        Text(
-            "Minute (Min - 0 to 59):",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = theme.textPrimary
-        )
-        Spacer(Modifier.height(6.dp))
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            items(12) { mIndex ->
-                val m = mIndex * 5
-                val isSelected = minuteInput.toIntOrNull() == m
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isSelected) theme.primary else theme.trackBg,
-                    modifier = Modifier
-                        .clickable { onMinuteChange(m.toString()) }
-                        .padding(vertical = 4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                        // Delete Button
                         Text(
-                            String.format(Locale.US, "%02d", m),
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else theme.textPrimary
+                            "🗑️",
+                            fontSize = 16.sp,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { onDeleteRoutine(item) }
+                                .padding(8.dp)
                         )
                     }
                 }
             }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "Color",
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = theme.textPrimary
-        )
-        Spacer(Modifier.height(10.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            SubjectSwatchColors.forEachIndexed { idx, color ->
-                val isSelected = idx == selectedColorIndex
-                Box(
-                    modifier = Modifier
-                        .size(46.dp)
-                        .shadow(if (isSelected) 6.dp else 2.dp, CircleShape)
-                        .clip(CircleShape)
-                        .background(color)
-                        .border(
-                            width = if (isSelected) 3.dp else 0.dp,
-                            color = if (isSelected) theme.textPrimary else Color.Transparent,
-                            shape = CircleShape
-                        )
-                        .clickable { onSelectColor(idx) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(SubjectSwatchIcons[idx], fontSize = 18.sp)
-                }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-        Button(
-            onClick = onSave,
-            shape = RoundedCornerShape(50),
-            colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
-                .shadow(6.dp, RoundedCornerShape(50))
-        ) {
-            Text(
-                "Save class",
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
         }
     }
 }
 
-// SECTION 2: VISUALLY UPGRADED NEPALI BIKRAM SAMBAT (BS) CALENDAR
+// ------------------- SCREEN 3: CALENDAR SCREEN -------------------
 @Composable
-fun NepaliCalendarSection(
+fun CalendarSection(
     routines: List<RoutineItem>,
-    todayStudiedMinutes: Int,
-    completionPercent: Int,
+    onStartRoutine: (RoutineItem) -> Unit,
 ) {
     val theme = LocalAppTheme.current
-    val todayNepali = remember { NepaliCalendarUtils.getCurrentNepaliDate() }
-    var selectedYear by remember { mutableIntStateOf(todayNepali.year) }
-    var selectedMonthIndex by remember { mutableIntStateOf(todayNepali.monthIndex) }
-    var selectedDay by remember { mutableIntStateOf(todayNepali.day) }
+    val calendar = remember { Calendar.getInstance() }
+    val currentMonthName = remember { SimpleDateFormat("MMMM yyyy", Locale.US).format(calendar.time) }
+    var selectedDay by remember { mutableIntStateOf(27) }
 
-    val monthName = NepaliCalendarUtils.nepaliMonths[selectedMonthIndex]
-    val totalDays = NepaliCalendarUtils.getDaysInMonth(selectedMonthIndex, selectedYear)
-    val startOffset =
-        NepaliCalendarUtils.getFirstDayOfWeekOffset(selectedYear, selectedMonthIndex)
-
-    val completedCount = routines.count { it.isCompleted }
-    val latestRoutine = routines.lastOrNull { it.isCompleted } ?: routines.firstOrNull()
-    val dailyGoalMinutes = routines.sumOf { it.minutes }.coerceAtLeast(60)
-    val goalProgress = (todayStudiedMinutes.toFloat() / dailyGoalMinutes).coerceIn(0f, 1f)
-    val goalPercent = (goalProgress * 100).toInt()
+    val daysInMonth = 30
+    val startOffset = 6
+    val achievementRoutine = routines.find { it.isCompleted } ?: routines.firstOrNull()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .padding(bottom = 20.dp)
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    "$monthName $selectedYear BS",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = theme.textPrimary
-                )
-                Text(
-                    "🇳🇵 ${todayNepali.dayOfWeekName}, ${todayNepali.monthName} ${todayNepali.day}, ${todayNepali.year}",
-                    fontSize = 12.sp,
-                    color = theme.primary,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                if (selectedYear != todayNepali.year || selectedMonthIndex != todayNepali.monthIndex) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(theme.softContainer)
-                            .clickable {
-                                selectedYear = todayNepali.year
-                                selectedMonthIndex = todayNepali.monthIndex
-                                selectedDay = todayNepali.day
-                            }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
-                    ) {
-                        Text(
-                            "Today",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = theme.primary
-                        )
-                    }
-                }
-                Surface(
-                    shape = CircleShape,
-                    color = theme.cardSurface,
-                    shadowElevation = 3.dp,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            if (selectedMonthIndex == 0) {
-                                selectedMonthIndex = 11
-                                selectedYear -= 1
-                            } else {
-                                selectedMonthIndex -= 1
-                            }
-                            selectedDay = 1
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("‹", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = theme.primary)
-                    }
-                }
-                Surface(
-                    shape = CircleShape,
-                    color = theme.cardSurface,
-                    shadowElevation = 3.dp,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            if (selectedMonthIndex == 11) {
-                                selectedMonthIndex = 0
-                                selectedYear += 1
-                            } else {
-                                selectedMonthIndex += 1
-                            }
-                            selectedDay = 1
-                        }
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("›", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = theme.primary)
-                    }
-                }
-            }
-        }
+        Text(currentMonthName, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
 
         Spacer(Modifier.height(14.dp))
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 8.dp)
-        ) {
-            NepaliCalendarUtils.weekDays.forEachIndexed { idx, day ->
+        Row(modifier = Modifier.fillMaxWidth()) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { day ->
                 Text(
-                    text = day.take(1),
+                    text = day,
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     fontSize = 13.sp,
-                    color = if (idx == 6) Color(0xFFD14B5A) else theme.textSecondary
+                    color = theme.textSecondary
                 )
             }
         }
 
-        val totalCells = startOffset + totalDays
+        Spacer(Modifier.height(10.dp))
+
+        val totalCells = startOffset + daysInMonth
         val rows = (totalCells + 6) / 7
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1968,34 +1398,18 @@ fun NepaliCalendarSection(
                     for (col in 0 until 7) {
                         val cellIndex = row * 7 + col
                         val dayNum = cellIndex - startOffset + 1
-                        if (dayNum in 1..totalDays) {
-                            val isToday =
-                                selectedYear == todayNepali.year &&
-                                        selectedMonthIndex == todayNepali.monthIndex &&
-                                        dayNum == todayNepali.day
-                            val isSelected = dayNum == selectedDay && !isToday
-                            val isSaturday = col == 6
-                            val hasRoutineDot = routines.isNotEmpty() && isToday
+                        if (dayNum in 1..daysInMonth) {
+                            val isSelected = dayNum == selectedDay
+                            val hasDot = dayNum in listOf(3, 10, 18, 25)
 
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = if (isToday) theme.primary else theme.cardSurface,
-                                shadowElevation = if (isToday) 8.dp else 3.dp,
+                                shape = RoundedCornerShape(20.dp),
+                                color = if (isSelected) theme.primary else theme.cardSurface,
+                                shadowElevation = if (isSelected) 6.dp else 1.dp,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .aspectRatio(1.05f)
-                                    .then(
-                                        if (isSelected) {
-                                            Modifier.border(
-                                                1.5.dp,
-                                                theme.borderAccent,
-                                                RoundedCornerShape(14.dp)
-                                            )
-                                        } else {
-                                            Modifier
-                                        }
-                                    )
-                                    .clip(RoundedCornerShape(14.dp))
+                                    .aspectRatio(1f)
+                                    .clip(RoundedCornerShape(20.dp))
                                     .clickable { selectedDay = dayNum }
                             ) {
                                 Box(
@@ -2004,22 +1418,18 @@ fun NepaliCalendarSection(
                                 ) {
                                     Text(
                                         text = "$dayNum",
-                                        fontSize = 14.sp,
-                                        fontWeight = if (isToday || isSelected) FontWeight.Bold else FontWeight.Medium,
-                                        color = when {
-                                            isToday -> Color.White
-                                            isSaturday -> Color(0xFFD14B5A)
-                                            else -> theme.textPrimary
-                                        }
+                                        fontSize = 15.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) Color.White else theme.textPrimary
                                     )
-                                    if (hasRoutineDot) {
+                                    if (hasDot && !isSelected) {
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.BottomCenter)
-                                                .padding(bottom = 5.dp)
-                                                .size(5.dp)
+                                                .padding(bottom = 4.dp)
+                                                .size(4.dp)
                                                 .clip(CircleShape)
-                                                .background(Color.White)
+                                                .background(Color(0xFFEC4899))
                                         )
                                     }
                                 }
@@ -2032,214 +1442,134 @@ fun NepaliCalendarSection(
             }
         }
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(20.dp))
 
         Surface(
-            shape = RoundedCornerShape(24.dp),
+            shape = RoundedCornerShape(28.dp),
             color = theme.cardSurface,
-            shadowElevation = 6.dp,
+            shadowElevation = 3.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(modifier = Modifier.padding(18.dp)) {
+            Column(modifier = Modifier.padding(20.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        "Daily goal",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = theme.textPrimary
-                    )
-                    Text(
-                        "$todayStudiedMinutes of $dailyGoalMinutes mins",
-                        fontSize = 13.sp,
-                        color = theme.textSecondary,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Text("Daily goal", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                    Text("3 of 5 study hours", fontSize = 13.sp, color = theme.textSecondary, fontWeight = FontWeight.Medium)
                 }
+
                 Spacer(Modifier.height(12.dp))
-                RoundedPillProgressBar(
-                    progress = goalProgress,
-                    fillColor = theme.primary,
-                    trackColor = theme.softContainer,
+
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(12.dp)
-                )
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "$goalPercent% complete · keep going! 💪",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = theme.primary
-                )
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-        Text(
-            "Today's Achievement:",
-            fontSize = 18.sp,
-            fontWeight = FontWeight.Bold,
-            color = theme.textPrimary
-        )
-        Spacer(Modifier.height(10.dp))
-
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = theme.cardSurface,
-            shadowElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                val badgeColor = latestRoutine?.let {
-                    SubjectSwatchColors[it.colorIndex.coerceIn(0, SubjectSwatchColors.lastIndex)]
-                } ?: theme.softContainer
-                val badgeIcon = latestRoutine?.let {
-                    SubjectSwatchIcons[it.colorIndex.coerceIn(0, SubjectSwatchIcons.lastIndex)]
-                } ?: "🎯"
-
-                Box(
-                    modifier = Modifier
-                        .size(54.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(badgeColor),
-                    contentAlignment = Alignment.Center
+                        .height(10.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color(0xFFE2E8F0))
                 ) {
-                    Text(badgeIcon, fontSize = 24.sp)
-                }
-
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        if (routines.isEmpty()) "$monthName $selectedDay, $selectedYear BS"
-                        else "$completionPercent% of plan completed ($completedCount/${routines.size})",
-                        fontSize = 12.sp,
-                        color = theme.textSecondary
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        if (completionPercent >= 100) "Plan Completed! 🎉" else (latestRoutine?.subject ?: "Ready to start studying"),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = theme.textPrimary
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .background(if (completionPercent >= 100) theme.primary else theme.softContainer)
-                        .border(3.dp, theme.primary, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        if (completionPercent >= 100) "✓" else "$completionPercent%",
-                        fontSize = if (completionPercent >= 100) 20.sp else 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = if (completionPercent >= 100) Color.White else theme.primary
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(16.dp))
-    }
-}
-
-// SECTION 3: DAILY / WEEKLY / MONTHLY LEADERBOARDS
-@Composable
-fun LeaderboardSection(leaderboard: List<StudentRecord>) {
-    val theme = LocalAppTheme.current
-    var timePeriod by remember { mutableIntStateOf(0) } // 0 = Daily, 1 = Weekly, 2 = Monthly
-    var leaderboardMode by remember { mutableIntStateOf(0) } // 0 = High Hours, 1 = Plan Done %
-
-    val periodMinutesFor: (StudentRecord) -> Int = { student ->
-        when (timePeriod) {
-            1 -> student.weeklyMinutes
-            2 -> student.monthlyMinutes
-            else -> student.todayMinutes
-        }
-    }
-
-    val sortedList = remember(leaderboard, timePeriod, leaderboardMode) {
-        if (leaderboardMode == 0) {
-            leaderboard.sortedByDescending {
-                when (timePeriod) {
-                    1 -> it.weeklyMinutes
-                    2 -> it.monthlyMinutes
-                    else -> it.todayMinutes
-                }
-            }
-        } else {
-            leaderboard.sortedByDescending { it.completionPercent }
-        }
-    }
-
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            "🏆 Friends Study Leaderboards",
-            fontWeight = FontWeight.Bold,
-            fontSize = 20.sp,
-            color = theme.textPrimary
-        )
-        Text(
-            "Compete across daily, weekly & monthly rankings!",
-            fontSize = 13.sp,
-            color = theme.textSecondary
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // Daily / Weekly / Monthly Period Switcher
-        Surface(
-            shape = RoundedCornerShape(50),
-            color = theme.cardSurface,
-            shadowElevation = 4.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                listOf("Daily", "Weekly", "Monthly").forEachIndexed { idx, label ->
-                    val selected = timePeriod == idx
                     Box(
                         modifier = Modifier
-                            .weight(1f)
+                            .fillMaxWidth(0.6f)
+                            .height(10.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(if (selected) theme.primary else Color.Transparent)
-                            .clickable { timePeriod = idx }
-                            .padding(vertical = 8.dp),
+                            .background(theme.primary)
+                    )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Text("60% complete · keep going! 💪", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Text("Today's Achievement:", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+
+        Spacer(Modifier.height(12.dp))
+
+        if (achievementRoutine != null) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = theme.cardSurface,
+                shadowElevation = 3.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(24.dp))
+                    .clickable { onStartRoutine(achievementRoutine) }
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(Color(0xFFE5F5D9)),
                         contentAlignment = Alignment.Center
                     ) {
+                        Text("🧪", fontSize = 26.sp)
+                    }
+
+                    Spacer(Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            label,
+                            "${achievementRoutine.startTime} - ${achievementRoutine.endTime}",
                             fontSize = 13.sp,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) Color.White else theme.textSecondary
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.textSecondary
                         )
+                        Spacer(Modifier.height(2.dp))
+                        Text(achievementRoutine.subject, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFC7B8EA))
+                            .border(3.dp, Color(0xFF9E86DC), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("✔", fontSize = 18.sp, color = Color(0xFF6C5CE7), fontWeight = FontWeight.ExtraBold)
+                        }
                     }
                 }
             }
         }
+    }
+}
 
-        Spacer(Modifier.height(10.dp))
+// ------------------- SCREEN 4: LEADERBOARD SCREEN -------------------
+@Composable
+fun LeaderboardSection(
+    studentName: String,
+) {
+    val theme = LocalAppTheme.current
+    var selectedTab by remember { mutableIntStateOf(0) }
 
-        // Metric Tab Switcher (High Hours vs Plan Done %)
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text("🏆 Friends Study Leaderboards", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = theme.textPrimary)
+        Text("Compete for high hours & plan completion!", fontSize = 13.sp, color = theme.textSecondary)
+
+        Spacer(Modifier.height(16.dp))
+
         Surface(
             shape = RoundedCornerShape(50),
             color = theme.cardSurface,
-            shadowElevation = 4.dp,
+            shadowElevation = 3.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -2248,25 +1578,25 @@ fun LeaderboardSection(leaderboard: List<StudentRecord>) {
                     .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
                 listOf("⏱️ High Hours", "🎯 Plan Done %").forEachIndexed { idx, title ->
-                    val selected = leaderboardMode == idx
+                    val selected = selectedTab == idx
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(50))
-                            .clickable { leaderboardMode = idx }
-                            .padding(vertical = 8.dp),
+                            .clickable { selectedTab = idx }
+                            .padding(vertical = 10.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
                             title,
                             fontSize = 14.sp,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selected) theme.primary else theme.textSecondary
+                            color = if (selected) theme.textPrimary else theme.textSecondary
                         )
                         Spacer(Modifier.height(4.dp))
                         Box(
                             modifier = Modifier
-                                .fillMaxWidth(0.6f)
+                                .fillMaxWidth(0.5f)
                                 .height(3.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(if (selected) theme.primary else Color.Transparent)
@@ -2276,149 +1606,863 @@ fun LeaderboardSection(leaderboard: List<StudentRecord>) {
             }
         }
 
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(16.dp))
 
-        if (sortedList.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    "No friends on leaderboard yet. Be the first!",
-                    color = theme.textSecondary
-                )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 3.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(18.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(sortedList.size) { rankIndex ->
-                    val student = sortedList[rankIndex]
-                    val rank = rankIndex + 1
-                    val totalMins = periodMinutesFor(student)
-                    val hrs = totalMins / 60
-                    val mins = totalMins % 60
-
-                    Surface(
-                        shape = RoundedCornerShape(24.dp),
-                        color = theme.cardSurface,
-                        shadowElevation = 5.dp,
-                        modifier = Modifier.fillMaxWidth()
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("#1", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = theme.textPrimary)
+                    Spacer(Modifier.width(14.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFE8DFF5)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(16.dp)
-                                .fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    "#$rank",
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 17.sp,
-                                    color = theme.primary
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(theme.softContainer),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(student.avatar, fontSize = 22.sp)
-                                }
-                                Spacer(Modifier.width(12.dp))
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            student.name,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
-                                            color = theme.textPrimary
-                                        )
-                                        if (student.isStudying) {
-                                            Spacer(Modifier.width(6.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(8.dp)
-                                                    .clip(CircleShape)
-                                                    .background(Color(0xFF4CAF50))
-                                            )
-                                        }
-                                    }
-                                    Spacer(Modifier.height(6.dp))
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        if (rank == 1) {
-                                            BadgeChip("👑 #1 Champ", Color(0xFFFFE47A), Color(0xFF3E2D00))
-                                        }
-                                        if (student.isStudying) {
-                                            BadgeChip("🟢 Studying", Color(0xFFC8F0D2), Color(0xFF144D23))
-                                        }
-                                        when {
-                                            totalMins >= 500 ->
-                                                BadgeChip("🏆 Legend", Color(0xFFF3C6FF), Color(0xFF4A0E5C))
-                                            totalMins >= 200 ->
-                                                BadgeChip("🥇 Master", Color(0xFFFFDFB3), Color(0xFF5A3600))
-                                            totalMins >= 100 ->
-                                                BadgeChip("🥈 Pro", Color(0xFFCDE6FF), Color(0xFF0E3C66))
-                                            totalMins >= 30 ->
-                                                BadgeChip("🥉 Scholar", Color(0xFFE7DCD8), Color(0xFF452E28))
-                                            else ->
-                                                BadgeChip("🌱 Rookie", theme.trackBg, theme.textPrimary)
-                                        }
-                                    }
-                                }
-                            }
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    if (leaderboardMode == 0) "${hrs}hr ${mins}m"
-                                    else "${student.completionPercent}%",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = theme.primary
-                                )
-                                Text(
-                                    if (leaderboardMode == 0) "${student.completionPercent}% done"
-                                    else "${hrs}hr ${mins}m",
-                                    fontSize = 12.sp,
-                                    color = theme.textSecondary
-                                )
-                            }
+                        Text("🎓", fontSize = 24.sp)
+                    }
+                    Spacer(Modifier.width(14.dp))
+                    Column {
+                        Text(studentName.ifBlank { "Sasim" }, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = theme.textPrimary)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            BadgeChip("🔥 #1 Champ", Color(0xFFFDE68A), Color(0xFF78350F))
+                            BadgeChip("🌱 Rookie", Color(0xFFE2E8F0), Color(0xFF334155))
                         }
                     }
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("0hr 0m", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = theme.textPrimary)
+                    Text("0% done", fontSize = 12.sp, color = theme.textSecondary)
                 }
             }
         }
     }
 }
 
+// ------------------- SCREEN 5: STUDY TIME!! -------------------
 @Composable
-fun RoundedPillProgressBar(
-    progress: Float,
-    fillColor: Color,
-    trackColor: Color,
-    modifier: Modifier = Modifier,
+fun StudyTimeScreen(
+    secondsLeft: Int,
+    isFaceDetected: Boolean,
+    isBannerDismissed: Boolean,
+    onFacePresenceChanged: (Boolean) -> Unit,
+    onDismissBanner: () -> Unit,
+    onBack: () -> Unit,
 ) {
-    val clamped = progress.coerceIn(0f, 1f)
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(trackColor)
+    val theme = LocalAppTheme.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (clamped > 0f) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Text("←", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+            }
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("Study Time!!", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                Text("Just you and your goals.", fontSize = 14.sp, color = theme.textSecondary)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            color = Color(0xFFC4C4CD),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(340.dp)
+                .clip(RoundedCornerShape(28.dp))
+        ) {
+            FaceDetectionCameraPreview(
+                onFacePresenceChanged = onFacePresenceChanged,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        if (!isBannerDismissed) {
+            val bannerBg = if (isFaceDetected) Color(0xFFD7F0E5) else Color(0xFFFEE2E2)
+            val bannerBorder = if (isFaceDetected) Color(0xFFA8E6CF) else Color(0xFFFCA5A5)
+            val bannerTextColor = if (isFaceDetected) Color(0xFF194236) else Color(0xFF991B1B)
+
+            Surface(
+                shape = RoundedCornerShape(18.dp),
+                color = bannerBg,
+                border = BorderStroke(1.dp, bannerBorder),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (isFaceDetected)
+                            "Your Face is being detected. Please dont leave the cammera, Stay right There and Focus on your study"
+                        else
+                            "Could not detect your face. Please show your face on camera so we know you are focusing on your studies.",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = bannerTextColor,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "✕",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = bannerTextColor,
+                        modifier = Modifier
+                            .clickable { onDismissBanner() }
+                            .padding(4.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        Text(
+            "TIME LEFT:",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = theme.textSecondary,
+            letterSpacing = 1.sp
+        )
+        Spacer(Modifier.height(4.dp))
+
+        val mins = secondsLeft / 60
+        val secs = secondsLeft % 60
+        Text(
+            String.format(Locale.US, "%02d:%02d", mins, secs),
+            fontSize = 64.sp,
+            fontWeight = FontWeight.Normal,
+            color = theme.textPrimary
+        )
+
+        Spacer(Modifier.weight(1f))
+    }
+}
+
+// ------------------- SCREEN 6: SETTINGS SCREEN -------------------
+@Composable
+fun SettingsSection(
+    studentName: String,
+    themeMode: ThemeMode,
+    onOpenProfile: () -> Unit,
+    onOpenThemeSelection: () -> Unit,
+    onLogOut: () -> Unit,
+) {
+    val theme = LocalAppTheme.current
+    var classReminders by remember { mutableStateOf(true) }
+    var dailySummary by remember { mutableStateOf(true) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 24.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onOpenProfile) {
+                Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+            }
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("Settings", fontWeight = FontWeight.Bold, fontSize = 24.sp, color = theme.textPrimary)
+                Text("Make PadhaiPLUS+ work for you", fontSize = 13.sp, color = theme.textSecondary)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 3.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .clickable { onOpenProfile() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE8DFF5)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("🎓", fontSize = 26.sp)
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(studentName.ifBlank { "Sasim" }, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = theme.textPrimary)
+                    Text("Manage profile & avatar", fontSize = 13.sp, color = theme.textSecondary)
+                }
+                Text("›", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = theme.textSecondary)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text("Study preferences", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Class reminders", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("Get notified before each class", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                    Switch(
+                        checked = classReminders,
+                        onCheckedChange = { classReminders = it },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF6C5CE7))
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = theme.borderAccent.copy(alpha = 0.3f))
+                Spacer(Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Reminder time", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("Get Reminder before time ends", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("10 min before ", fontSize = 13.sp, color = theme.textSecondary)
+                        Text("›", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.textSecondary)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = theme.borderAccent.copy(alpha = 0.3f))
+                Spacer(Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Daily study summary", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("A little reflection on your progress", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                    Switch(
+                        checked = dailySummary,
+                        onCheckedChange = { dailySummary = it },
+                        colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF6C5CE7))
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text("Theme selection", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 2.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .clickable { onOpenThemeSelection() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Theme", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+                    Text("Choose your study space's look", fontSize = 12.sp, color = theme.textSecondary)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(themeMode.displayName + " ", fontSize = 13.sp, color = theme.textSecondary)
+                    Text("›", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.textSecondary)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
+
+        OutlinedButton(
+            onClick = onLogOut,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            Text("Log out", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.primary)
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("PadhaiPLUS+", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = theme.textSecondary)
+            Text("Your space to learn, one day at a time.", fontSize = 12.sp, color = theme.textSecondary.copy(alpha = 0.7f))
+        }
+    }
+}
+
+// ------------------- SCREEN 7: THEME SELECTION SCREEN -------------------
+@Composable
+fun ThemeSelectionScreen(
+    currentTheme: AppThemeStyle,
+    themeMode: ThemeMode,
+    onSelectTheme: (AppThemeStyle) -> Unit,
+    onSelectThemeMode: (ThemeMode) -> Unit,
+    onBack: () -> Unit,
+) {
+    val theme = LocalAppTheme.current
+    var selectedAppTheme by remember { mutableStateOf(currentTheme) }
+    var selectedThemeMode by remember { mutableStateOf(themeMode) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 24.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+            }
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("Theme", fontWeight = FontWeight.Bold, fontSize = 24.sp, color = theme.textPrimary)
+                Text("A little more you. A little more focus.", fontSize = 13.sp, color = theme.textSecondary)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text("Appearance", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+        Text("Pick the light that feels right.", fontSize = 13.sp, color = theme.textSecondary)
+        Spacer(Modifier.height(14.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            listOf(
+                Triple(ThemeMode.LIGHT, "Light", Color(0xFFF1F5F9)),
+                Triple(ThemeMode.DARK, "Dark", Color(0xFF1E293B)),
+                Triple(ThemeMode.SYSTEM, "System", Color(0xFF475569))
+            ).forEach { (mode, label, mockBg) ->
+                val isSelected = (selectedThemeMode == mode)
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = theme.cardSurface,
+                    border = if (isSelected) BorderStroke(2.dp, theme.primary) else null,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(22.dp))
+                        .clickable { selectedThemeMode = mode }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(64.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(mockBg)
+                                .padding(8.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Box(modifier = Modifier.width(36.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(theme.primary))
+                                Box(modifier = Modifier.fillMaxWidth().height(16.dp).clip(RoundedCornerShape(4.dp)).background(theme.cardSurface))
+                                Box(modifier = Modifier.width(24.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(theme.textSecondary))
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = theme.textPrimary)
+                            Box(
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .clip(CircleShape)
+                                    .border(2.dp, if (isSelected) theme.primary else theme.borderAccent, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(theme.primary)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "System follows your device's light or dark setting.",
+            fontSize = 12.sp,
+            color = theme.textSecondary
+        )
+
+        Spacer(Modifier.height(24.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Accent color", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+            }
+            Text(selectedAppTheme.displayName, fontSize = 13.sp, color = theme.textSecondary, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AppThemeStyle.entries.forEach { style ->
+                    val isSelected = selectedAppTheme == style
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { selectedAppTheme = style }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(style.primaryColor),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(style.displayName, fontSize = 11.sp, color = theme.textSecondary)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text("Preview", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 3.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Text("Your study space", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+                Text("A little progress, every day.", fontSize = 12.sp, color = theme.textSecondary)
+                Spacer(Modifier.height(14.dp))
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = theme.trackBg,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("UP NEXT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = selectedAppTheme.primaryColor)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Mathematics", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+                        Text("2:00 PM – 3:00 PM", fontSize = 12.sp, color = theme.textSecondary)
+                        Spacer(Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(theme.cardSurface)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.55f)
+                                    .height(6.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(selectedAppTheme.primaryColor)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(28.dp))
+
+        Button(
+            onClick = {
+                onSelectTheme(selectedAppTheme)
+                onSelectThemeMode(selectedThemeMode)
+                onBack()
+            },
+            shape = RoundedCornerShape(50),
+            colors = ButtonDefaults.buttonColors(containerColor = selectedAppTheme.primaryColor),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            Text("Done", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Make your study space feel like home.",
+            fontSize = 12.sp,
+            color = theme.textSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+// ------------------- SCREEN 8: ADD / EDIT SUBJECT SHEET -------------------
+@Composable
+fun AddSubjectSheetContent(
+    isEditing: Boolean = false,
+    subjectInput: String,
+    onSubjectChange: (String) -> Unit,
+    startTimeInput: String,
+    onStartTimeChange: (String) -> Unit,
+    endTimeInput: String,
+    onEndTimeChange: (String) -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit = {},
+) {
+    val theme = LocalAppTheme.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp)
+            .padding(bottom = 28.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(clamped)
-                    .height(12.dp)
+                    .width(48.dp)
+                    .height(5.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(fillColor)
+                    .background(Color(0xFFCBD5E1))
             )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (isEditing) "Edit Subject:" else "Add Subject:",
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = theme.textPrimary
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Text("Subject name", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+        Spacer(Modifier.height(6.dp))
+        OutlinedTextField(
+            value = subjectInput,
+            onValueChange = onSubjectChange,
+            placeholder = { Text("e.g. Mathematics", color = theme.textSecondary.copy(alpha = 0.5f)) },
+            singleLine = true,
+            shape = RoundedCornerShape(16.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = theme.primary,
+                unfocusedBorderColor = theme.borderAccent,
+                focusedContainerColor = theme.cardSurface,
+                unfocusedContainerColor = theme.cardSurface,
+                focusedTextColor = theme.textPrimary,
+                unfocusedTextColor = theme.textPrimary,
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Start time", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = startTimeInput,
+                    onValueChange = onStartTimeChange,
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = theme.primary,
+                        unfocusedBorderColor = theme.borderAccent,
+                        focusedContainerColor = theme.cardSurface,
+                        unfocusedContainerColor = theme.cardSurface,
+                        focusedTextColor = theme.textPrimary,
+                        unfocusedTextColor = theme.textPrimary,
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text("End time", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = endTimeInput,
+                    onValueChange = onEndTimeChange,
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = theme.primary,
+                        unfocusedBorderColor = theme.borderAccent,
+                        focusedContainerColor = theme.cardSurface,
+                        unfocusedContainerColor = theme.cardSurface,
+                        focusedTextColor = theme.textPrimary,
+                        unfocusedTextColor = theme.textPrimary,
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        Button(
+            onClick = onSave,
+            shape = RoundedCornerShape(50),
+            colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .shadow(6.dp, RoundedCornerShape(50))
+        ) {
+            Text(
+                if (isEditing) "Update class" else "Save class",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+
+        if (isEditing) {
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onDelete,
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Delete class", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
+// ------------------- FLOATING PILL BOTTOM NAVIGATION BAR -------------------
+@Composable
+fun FloatingPillBottomBar(
+    selectedSection: Int,
+    onSelectSection: (Int) -> Unit,
+) {
+    val theme = LocalAppTheme.current
+    val items = listOf(
+        Pair("Routines", "ic_routines"),
+        Pair("Calendar", "ic_calendar"),
+        Pair("Leaderboard", "ic_leaderboard"),
+        Pair("Settings", "ic_settings")
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = theme.cardSurface,
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                items.forEachIndexed { index, (label, iconType) ->
+                    val selected = selectedSection == index
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (selected) theme.navSelectedBg else Color.Transparent)
+                            .clickable { onSelectSection(index) }
+                            .padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Canvas(modifier = Modifier.size(22.dp)) {
+                                val iconColor = if (selected) theme.navSelectedText else theme.textSecondary
+                                val strokeWidth = 3f
+
+                                when (iconType) {
+                                    "ic_routines" -> {
+                                        val path = Path().apply {
+                                            moveTo(size.width * 0.15f, size.height * 0.5f)
+                                            lineTo(size.width * 0.5f, size.height * 0.15f)
+                                            lineTo(size.width * 0.85f, size.height * 0.5f)
+                                            lineTo(size.width * 0.85f, size.height * 0.85f)
+                                            lineTo(size.width * 0.15f, size.height * 0.85f)
+                                            close()
+                                        }
+                                        drawPath(path, color = iconColor, style = Stroke(width = strokeWidth))
+                                        val door = Path().apply {
+                                            moveTo(size.width * 0.4f, size.height * 0.85f)
+                                            lineTo(size.width * 0.4f, size.height * 0.6f)
+                                            lineTo(size.width * 0.6f, size.height * 0.6f)
+                                            lineTo(size.width * 0.6f, size.height * 0.85f)
+                                        }
+                                        drawPath(door, color = iconColor, style = Stroke(width = strokeWidth))
+                                    }
+
+                                    "ic_calendar" -> {
+                                        val rectPath = Path().apply {
+                                            moveTo(size.width * 0.15f, size.height * 0.25f)
+                                            lineTo(size.width * 0.85f, size.height * 0.25f)
+                                            lineTo(size.width * 0.85f, size.height * 0.85f)
+                                            lineTo(size.width * 0.15f, size.height * 0.85f)
+                                            close()
+                                        }
+                                        drawPath(rectPath, color = iconColor, style = Stroke(width = strokeWidth))
+                                        drawLine(iconColor, Offset(size.width * 0.15f, size.height * 0.42f), Offset(size.width * 0.85f, size.height * 0.42f), strokeWidth = strokeWidth)
+                                        drawLine(iconColor, Offset(size.width * 0.35f, size.height * 0.1f), Offset(size.width * 0.35f, size.height * 0.25f), strokeWidth = strokeWidth)
+                                        drawLine(iconColor, Offset(size.width * 0.65f, size.height * 0.1f), Offset(size.width * 0.65f, size.height * 0.25f), strokeWidth = strokeWidth)
+                                    }
+
+                                    "ic_leaderboard" -> {
+                                        val trophyPath = Path().apply {
+                                            moveTo(size.width * 0.25f, size.height * 0.2f)
+                                            lineTo(size.width * 0.75f, size.height * 0.2f)
+                                            lineTo(size.width * 0.65f, size.height * 0.6f)
+                                            lineTo(size.width * 0.35f, size.height * 0.6f)
+                                            close()
+                                        }
+                                        drawPath(trophyPath, color = iconColor, style = Stroke(width = strokeWidth))
+                                        drawLine(iconColor, Offset(size.width * 0.5f, size.height * 0.6f), Offset(size.width * 0.5f, size.height * 0.8f), strokeWidth = strokeWidth)
+                                        drawLine(iconColor, Offset(size.width * 0.3f, size.height * 0.8f), Offset(size.width * 0.7f, size.height * 0.8f), strokeWidth = strokeWidth)
+                                    }
+
+                                    else -> {
+                                        drawCircle(iconColor, radius = size.width * 0.22f, center = Offset(size.width * 0.5f, size.height * 0.5f), style = Stroke(width = strokeWidth))
+                                        for (i in 0 until 6) {
+                                            val angle = i * 60 * Math.PI / 180
+                                            val startX = (size.width * 0.5f + size.width * 0.22f * Math.cos(angle)).toFloat()
+                                            val startY = (size.height * 0.5f + size.width * 0.22f * Math.sin(angle)).toFloat()
+                                            val endX = (size.width * 0.5f + size.width * 0.38f * Math.cos(angle)).toFloat()
+                                            val endY = (size.height * 0.5f + size.width * 0.38f * Math.sin(angle)).toFloat()
+                                            drawLine(iconColor, Offset(startX, startY), Offset(endX, endY), strokeWidth = strokeWidth)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = label,
+                                fontSize = 11.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) theme.navSelectedText else theme.textSecondary
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -2436,177 +2480,11 @@ fun BadgeChip(
         Text(
             text = text,
             fontSize = 11.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = FontWeight.Bold,
             color = textColor,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
         )
     }
-}
-
-// Interactive Time Adjuster Dialog for Alarms
-@Composable
-fun InteractiveAlarmAdjusterDialog(
-    routine: RoutineItem,
-    onDismiss: () -> Unit,
-    onSave: (RoutineItem) -> Unit,
-) {
-    val theme = LocalAppTheme.current
-    var selectedHour by remember { mutableIntStateOf(routine.hour) }
-    var selectedMinute by remember { mutableIntStateOf(routine.minute) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = theme.cardSurface,
-        shape = RoundedCornerShape(28.dp),
-        title = {
-            Text(
-                "⏰ Adjust Alarm for ${routine.subject}",
-                fontWeight = FontWeight.Bold,
-                color = theme.textPrimary
-            )
-        },
-        text = {
-            Column {
-                Text(
-                    "Select Quick Time Preset:",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = theme.textPrimary
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { selectedHour = 7; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("🌅 Morning", color = theme.textPrimary) }
-                    Button(
-                        onClick = { selectedHour = 13; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("☀️ Noon", color = theme.textPrimary) }
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { selectedHour = 18; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("🌆 Evening", color = theme.textPrimary) }
-                    Button(
-                        onClick = { selectedHour = 21; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("🌙 Night", color = theme.textPrimary) }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Fine-tune Time:",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = theme.textPrimary
-                )
-                Spacer(Modifier.height(8.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Hour", fontSize = 12.sp, color = theme.textSecondary)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                selectedHour = if (selectedHour == 0) 23 else selectedHour - 1
-                            }) { Text("-", color = theme.primary, fontSize = 18.sp) }
-                            Text(
-                                String.format(Locale.US, "%02d", selectedHour),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = theme.textPrimary
-                            )
-                            TextButton(onClick = {
-                                selectedHour = (selectedHour + 1) % 24
-                            }) { Text("+", color = theme.primary, fontSize = 18.sp) }
-                        }
-                    }
-                    Text(":", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = theme.primary)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Minute", fontSize = 12.sp, color = theme.textSecondary)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                selectedMinute =
-                                    if (selectedMinute < 5) 55 else selectedMinute - 5
-                            }) { Text("-", color = theme.primary, fontSize = 18.sp) }
-                            Text(
-                                String.format(Locale.US, "%02d", selectedMinute),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = theme.textPrimary
-                            )
-                            TextButton(onClick = {
-                                selectedMinute = (selectedMinute + 5) % 60
-                            }) { Text("+", color = theme.primary, fontSize = 18.sp) }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                shape = RoundedCornerShape(50),
-                colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
-                onClick = {
-                    onSave(routine.copy(hour = selectedHour, minute = selectedMinute, isEnabled = true))
-                }
-            ) {
-                Text("Save & Enable Alarm")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel", color = theme.textSecondary)
-            }
-        }
-    )
-}
-
-private fun formatTime12Hr(hour24: Int, minute: Int): String {
-    val amPm = if (hour24 >= 12) "PM" else "AM"
-    val displayHour = if (hour24 % 12 == 0) 12 else hour24 % 12
-    return String.format(Locale.US, "%02d:%02d %s", displayHour, minute, amPm)
-}
-
-private fun currentDayKey(): String {
-    val cal = Calendar.getInstance()
-    return String.format(
-        Locale.US,
-        "%04d-%02d-%02d",
-        cal[Calendar.YEAR],
-        cal[Calendar.MONTH] + 1,
-        cal[Calendar.DAY_OF_MONTH]
-    )
-}
-
-private fun currentWeekKey(): String {
-    val cal = Calendar.getInstance()
-    return String.format(
-        Locale.US,
-        "%04d-W%02d",
-        cal[Calendar.YEAR],
-        cal[Calendar.WEEK_OF_YEAR]
-    )
-}
-
-private fun currentMonthKey(): String {
-    val cal = Calendar.getInstance()
-    return String.format(
-        Locale.US,
-        "%04d-%02d",
-        cal[Calendar.YEAR],
-        cal[Calendar.MONTH] + 1
-    )
 }
 
 fun saveStudyProgress(
@@ -2622,9 +2500,11 @@ fun saveStudyProgress(
     val cleanId = docId.ifBlank {
         studentName.trim().lowercase().replace(Regex("[^a-z0-9_]"), "_").ifBlank { "student" }
     }
-    val todayKey = currentDayKey()
-    val weekKey = currentWeekKey()
-    val monthKey = currentMonthKey()
+    val cal = Calendar.getInstance()
+    val todayKey = String.format(Locale.US, "%04d-%02d-%02d", cal[Calendar.YEAR], cal[Calendar.MONTH] + 1, cal[Calendar.DAY_OF_MONTH])
+    val weekKey = String.format(Locale.US, "%04d-W%02d", cal[Calendar.YEAR], cal[Calendar.WEEK_OF_YEAR])
+    val monthKey = String.format(Locale.US, "%04d-%02d", cal[Calendar.YEAR], cal[Calendar.MONTH] + 1)
+
     val docRef = db.collection("students").document(cleanId)
 
     val baseUpdates = hashMapOf<String, Any>(
@@ -2633,53 +2513,21 @@ fun saveStudyProgress(
         "avatar" to avatar,
         "isStudying" to isStudying,
         "currentSubject" to subject,
-        "completionPercent" to completionPercent
+        "completionPercent" to completionPercent,
+        "todayMinutes" to FieldValue.increment(minutesToAdd.toLong()),
+        "weeklyMinutes" to FieldValue.increment(minutesToAdd.toLong()),
+        "monthlyMinutes" to FieldValue.increment(minutesToAdd.toLong()),
+        "dayKey" to todayKey,
+        "weekKey" to weekKey,
+        "monthKey" to monthKey
     )
 
-    if (minutesToAdd <= 0) {
-        docRef.set(baseUpdates, SetOptions.merge())
-        return
-    }
-
-    docRef.get().addOnSuccessListener { doc ->
-        val storedDay = doc.getString("dayKey")
-        val storedWeek = doc.getString("weekKey")
-        val storedMonth = doc.getString("monthKey")
-
-        baseUpdates["dayKey"] = todayKey
-        baseUpdates["weekKey"] = weekKey
-        baseUpdates["monthKey"] = monthKey
-
-        baseUpdates["todayMinutes"] = if (storedDay == null || storedDay == todayKey) {
-            FieldValue.increment(minutesToAdd.toLong())
-        } else {
-            minutesToAdd.toLong()
-        }
-        baseUpdates["weeklyMinutes"] = if (storedWeek == null || storedWeek == weekKey) {
-            FieldValue.increment(minutesToAdd.toLong())
-        } else {
-            minutesToAdd.toLong()
-        }
-        baseUpdates["monthlyMinutes"] = if (storedMonth == null || storedMonth == monthKey) {
-            FieldValue.increment(minutesToAdd.toLong())
-        } else {
-            minutesToAdd.toLong()
-        }
-        docRef.set(baseUpdates, SetOptions.merge())
-    }.addOnFailureListener {
-        baseUpdates["dayKey"] = todayKey
-        baseUpdates["weekKey"] = weekKey
-        baseUpdates["monthKey"] = monthKey
-        baseUpdates["todayMinutes"] = FieldValue.increment(minutesToAdd.toLong())
-        baseUpdates["weeklyMinutes"] = FieldValue.increment(minutesToAdd.toLong())
-        baseUpdates["monthlyMinutes"] = FieldValue.increment(minutesToAdd.toLong())
-        docRef.set(baseUpdates, SetOptions.merge())
-    }
+    docRef.set(baseUpdates, SetOptions.merge())
 }
 
 fun saveRoutines(sharedPref: SharedPreferences, routines: List<RoutineItem>) {
     val serialized = routines.joinToString(";;;") {
-        "${it.id}:::${it.subject}:::${it.minutes}:::${it.hour}:::${it.minute}:::${it.isEnabled}:::${it.isCompleted}:::${it.colorIndex}"
+        "${it.id}:::${it.subject}:::${it.startTime}:::${it.endTime}:::${it.minutes}:::${it.hour}:::${it.minute}:::${it.isEnabled}:::${it.isCompleted}:::${it.colorIndex}"
     }
     sharedPref.edit { putString("saved_routines", serialized) }
 }
@@ -2689,16 +2537,18 @@ fun loadRoutines(sharedPref: SharedPreferences): List<RoutineItem> {
     if (serialized.isBlank()) return emptyList()
     return serialized.split(";;;").mapNotNull { entry ->
         val parts = entry.split(":::")
-        if (parts.size >= 8) {
+        if (parts.size >= 10) {
             RoutineItem(
                 id = parts[0].toIntOrNull() ?: (0..100000).random(),
                 subject = parts[1],
-                minutes = parts[2].toIntOrNull() ?: 60,
-                hour = parts[3].toIntOrNull() ?: 8,
-                minute = parts[4].toIntOrNull() ?: 0,
-                isEnabled = parts[5].toBoolean(),
-                isCompleted = parts[6].toBoolean(),
-                colorIndex = parts[7].toIntOrNull() ?: 0
+                startTime = parts[2],
+                endTime = parts[3],
+                minutes = parts[4].toIntOrNull() ?: 90,
+                hour = parts[5].toIntOrNull() ?: 8,
+                minute = parts[6].toIntOrNull() ?: 0,
+                isEnabled = parts[7].toBoolean(),
+                isCompleted = parts[8].toBoolean(),
+                colorIndex = parts[9].toIntOrNull() ?: 0
             )
         } else null
     }

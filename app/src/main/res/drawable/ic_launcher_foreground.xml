@@ -1,30 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
-        <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="85.84757"
-                android:endY="92.4963"
-                android:startX="42.9492"
-                android:startY="49.59793"
-                android:type="linear">
-                <item
-                    android:color="#44000000"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
-            </gradient>
-        </aapt:attr>
-    </path>
+
+    <!-- Open Book Left Page -->
     <path
-        android:fillColor="#FFFFFF"
-        android:fillType="nonZero"
-        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
-        android:strokeWidth="1"
-        android:strokeColor="#00000000" />
+        android:fillColor="#F1ECE1"
+        android:pathData="M18,62 L54,68 L54,84 L18,80 Z" />
+
+    <!-- Open Book Right Page -->
+    <path
+        android:fillColor="#E2D9C8"
+        android:pathData="M54,68 L90,62 L90,80 L54,84 Z" />
+
+    <!-- Stopwatch Crown Top Button -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M48,15 h12 v6 h-12 z" />
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M52,21 h4 v4 h-4 z" />
+
+    <!-- Stopwatch Top-Right Pusher -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M68,19 L76,25 L73,28 L65,22 Z" />
+
+    <!-- Stopwatch Outer Ring -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M54,23 C38,23 25,36 25,52 C25,68 38,81 54,81 C70,81 83,68 83,52 C83,36 70,23 54,23 Z M54,29 C66.7,29 77,39.3 77,52 C77,64.7 66.7,75 54,75 C41.3,75 31,64.7 31,52 C31,39.3 41.3,29 54,29 Z" />
+
+    <!-- Ticks -->
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M53,31 h2 v5 h-2 z M53,68 h2 v5 h-2 z M33,51 h5 v2 h-5 z M70,51 h5 v2 h-5 z" />
+
+    <!-- Clock Hands (12 & 4 o'clock) -->
+    <path
+        android:strokeColor="#FEF08A"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,52 L54,36" />
+
+    <path
+        android:strokeColor="#FEF08A"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,52 L66,59" />
+
+    <!-- Pivot -->
+    <path
+        android:fillColor="#F59E0B"
+        android:pathData="M54,52 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
 </vector>

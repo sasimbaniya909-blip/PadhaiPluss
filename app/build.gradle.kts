@@ -35,6 +35,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets {
+        getByName("main") {
+            res.directories.clear()
+            res.directories.add("src/main/res")
+        }
+    }
 }
 
 dependencies {
