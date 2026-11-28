@@ -443,9 +443,16 @@ fun PadhaiPlusApp(
         }
     }
 
+    // Sync timer pause state with face detection
+    LaunchedEffect(isFaceDetected, activeRoutine) {
+        if (activeRoutine != null) {
+            isTimerPaused = !isFaceDetected
+        }
+    }
+
     // Countdown Timer Loop
-    LaunchedEffect(activeRoutine, secondsLeft, isTimerPaused) {
-        if (activeRoutine != null && secondsLeft > 0 && !isTimerPaused) {
+    LaunchedEffect(activeRoutine, secondsLeft, isTimerPaused, isFaceDetected) {
+        if (activeRoutine != null && secondsLeft > 0 && !isTimerPaused && isFaceDetected) {
             delay(1000)
             secondsLeft -= 1
         } else if (activeRoutine != null && secondsLeft == 0) {
@@ -1728,9 +1735,9 @@ fun StudyTimeScreen(
                 ) {
                     Text(
                         text = if (isFaceDetected)
-                            "Your Face is being detected. Please dont leave the cammera, Stay right There and Focus on your study"
+                            "Your face is being detected. Stay in front of the camera and focus on your study!"
                         else
-                            "Could not detect your face. Please show your face on camera so we know you are focusing on your studies.",
+                            "Face not detected! Timer is paused. Please show your face on camera to resume your study session.",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = bannerTextColor,
@@ -1753,10 +1760,10 @@ fun StudyTimeScreen(
         Spacer(Modifier.weight(1f))
 
         Text(
-            "TIME LEFT:",
+            if (isFaceDetected) "TIME LEFT:" else "TIME LEFT (PAUSED):",
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
-            color = theme.textSecondary,
+            color = if (isFaceDetected) theme.textSecondary else Color(0xFFEF4444),
             letterSpacing = 1.sp
         )
         Spacer(Modifier.height(4.dp))
@@ -1767,8 +1774,25 @@ fun StudyTimeScreen(
             String.format(Locale.US, "%02d:%02d", mins, secs),
             fontSize = 64.sp,
             fontWeight = FontWeight.Normal,
-            color = theme.textPrimary
+            color = if (isFaceDetected) theme.textPrimary else theme.textPrimary.copy(alpha = 0.5f)
         )
+
+        if (!isFaceDetected) {
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFFEE2E2),
+                border = BorderStroke(1.dp, Color(0xFFFCA5A5))
+            ) {
+                Text(
+                    "⏸ Timer Paused — Face not detected",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF991B1B),
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                )
+            }
+        }
 
         Spacer(Modifier.weight(1f))
     }
