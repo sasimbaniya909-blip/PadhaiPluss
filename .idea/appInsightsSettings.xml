@@ -9,9 +9,9 @@
               <option name="connection">
                 <ConnectionSetting>
                   <option name="appId" value="com.ps.padhaiplus" />
-                  <option name="mobileSdkAppId" value="1:849884863140:android:0dab097d71bb2c0f826431" />
-                  <option name="projectId" value="padhaiplus-f381a" />
-                  <option name="projectNumber" value="849884863140" />
+                  <option name="mobileSdkAppId" value="1:519012602316:android:76ee487cc1fe9d207a8d69" />
+                  <option name="projectId" value="schedule-6c819" />
+                  <option name="projectNumber" value="519012602316" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />

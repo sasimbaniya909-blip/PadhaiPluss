@@ -63,8 +63,22 @@ object NepaliCalendarUtils {
         )
     }
 
-    fun getDaysInMonth(monthIndex: Int): Int {
+    fun getDaysInMonth(monthIndex: Int, year: Int = 2081): Int {
         val safeIndex = (monthIndex % 12 + 12) % 12
         return monthDays[safeIndex]
+    }
+
+    fun getFirstDayOfWeekOffset(year: Int, monthIndex: Int): Int {
+        val safeIndex = (monthIndex % 12 + 12) % 12
+        return (year + safeIndex * 3) % 7
+    }
+
+    fun getGreetingTitle(name: String): String {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        return when (hour) {
+            in 0..11 -> "Good Morning, $name"
+            in 12..16 -> "Good Afternoon, $name"
+            else -> "Good Evening, $name"
+        }
     }
 }

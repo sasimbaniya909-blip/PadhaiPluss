@@ -22,5 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PadhaiPlus+"
+rootProject.name = "PadhaiPlus"
 include(":app")
+ 

@@ -20,21 +20,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ps.padhaiplus.ui.theme.AppThemeStyle
 
 val AVATAR_OPTIONS = listOf("🎓", "🧙‍♂️", "🚀", "🦉", "⚡", "🌟", "💻", "🏆", "🦁", "🎨")
 
 @Composable
 fun ProfileDialog(
     studentName: String,
+    studentEmail: String = "",
     currentAvatar: String,
     todayMinutes: Int,
     completionPercent: Int,
+    currentTheme: AppThemeStyle = AppThemeStyle.INDIGO,
+    onSelectTheme: (AppThemeStyle) -> Unit = {},
+    onSignOut: () -> Unit = {},
     onDismiss: () -> Unit,
     onSaveAvatar: (String) -> Unit
 ) {
     var selectedAvatar by remember { mutableStateOf(currentAvatar.ifBlank { "🎓" }) }
 
-    // Gallery Photo Picker Launcher
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -51,7 +55,6 @@ fun ProfileDialog(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Profile Avatar Preview
                 Box(
                     modifier = Modifier
                         .size(72.dp)
@@ -64,11 +67,14 @@ fun ProfileDialog(
 
                 Spacer(Modifier.height(8.dp))
                 Text(studentName, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                Text("PadhaiPlus Account", fontSize = 12.sp, color = Color.Gray)
+                if (studentEmail.isNotBlank()) {
+                    Text(studentEmail, fontSize = 12.sp, color = Color.Gray)
+                } else {
+                    Text("PadhaiPlus Account", fontSize = 12.sp, color = Color.Gray)
+                }
 
                 Spacer(Modifier.height(12.dp))
 
-                // Stats Cards
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -89,7 +95,6 @@ fun ProfileDialog(
 
                 Spacer(Modifier.height(16.dp))
 
-                // Gallery Image Picker Button
                 OutlinedButton(
                     onClick = { galleryLauncher.launch("image/*") },
                     modifier = Modifier.fillMaxWidth()
@@ -121,6 +126,18 @@ fun ProfileDialog(
                             Text(avatar, fontSize = 22.sp)
                         }
                     }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = {
+                        onSignOut()
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("🚪 Sign Out / Switch Account")
                 }
             }
         },
