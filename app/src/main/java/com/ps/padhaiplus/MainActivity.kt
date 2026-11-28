@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +34,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -262,6 +265,13 @@ fun PadhaiPlusApp(
     var showAddSubjectSheet by remember { mutableStateOf(false) }
     var editingRoutine by remember { mutableStateOf<RoutineItem?>(null) }
     var showProfileDialog by remember { mutableStateOf(false) }
+    var showThemeSelectionScreen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(selectedSection) {
+        if (selectedSection != 3) {
+            showThemeSelectionScreen = false
+        }
+    }
 
     // Active Timer state, ML Kit Face Detection, & 60s Switch Grace Period
     var activeSubject by remember { mutableStateOf<String?>(null) }
@@ -729,6 +739,45 @@ fun PadhaiPlusApp(
                     )
 
                     2 -> LeaderboardSection(leaderboard = leaderboard)
+
+                    3 -> {
+                        if (showThemeSelectionScreen) {
+                            ThemeSelectionScreen(
+                                currentTheme = currentTheme,
+                                onSelectTheme = onSelectTheme,
+                                onBack = { showThemeSelectionScreen = false }
+                            )
+                        } else {
+                            SettingsSection(
+                                studentName = studentName,
+                                studentEmail = studentEmail,
+                                avatarPic = avatarPic,
+                                currentTheme = currentTheme,
+                                onOpenProfile = { showProfileDialog = true },
+                                onOpenThemeSelection = { showThemeSelectionScreen = true },
+                                onLogOut = {
+                                    auth.signOut()
+                                    scope.launch {
+                                        runCatching {
+                                            credentialManager.clearCredentialState(ClearCredentialStateRequest())
+                                        }
+                                    }
+                                    activeSubject = null
+                                    isTimerPaused = false
+                                    studentName = ""
+                                    studentEmail = ""
+                                    activeDocId = ""
+                                    isLoggedIn = false
+                                    sharedPref.edit {
+                                        putBoolean("is_logged_in", false)
+                                        putString("student_name", "")
+                                        putString("student_email", "")
+                                        putString("active_doc_id", "")
+                                    }
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1066,7 +1115,7 @@ fun FloatingPillBottomBar(
     onSelectSection: (Int) -> Unit,
 ) {
     val theme = LocalAppTheme.current
-    val items = listOf("Routines", "Calendar", "Leaderboard")
+    val items = listOf("Routines", "Calendar", "Leaderboard", "Settings")
 
     Box(
         modifier = Modifier
@@ -2443,7 +2492,7 @@ fun BadgeChip(
     }
 }
 
-// Interactive Time Adjuster Dialog for Alarms
+// Interactive Time Adjuster Dialog for Alarms (matching sample #9)
 @Composable
 fun InteractiveAlarmAdjusterDialog(
     routine: RoutineItem,
@@ -2451,104 +2500,99 @@ fun InteractiveAlarmAdjusterDialog(
     onSave: (RoutineItem) -> Unit,
 ) {
     val theme = LocalAppTheme.current
-    var selectedHour by remember { mutableIntStateOf(routine.hour) }
-    var selectedMinute by remember { mutableIntStateOf(routine.minute) }
+    
+    val initialHour24 = routine.hour
+    val initialMinute = routine.minute
+    
+    val initialIsAm = initialHour24 < 12
+    val initialHour12 = when {
+        initialHour24 == 0 -> 12
+        initialHour24 > 12 -> initialHour24 - 12
+        else -> initialHour24
+    }
+
+    var selectedHour12 by remember { mutableIntStateOf(initialHour12) }
+    var selectedMinute by remember { mutableIntStateOf(initialMinute) }
+    var isAm by remember { mutableStateOf(initialIsAm) }
+
+    val hours = (1..12).toList()
+    val minutes = (0..59).toList()
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = theme.cardSurface,
+        containerColor = Color(0xFF121212),
         shape = RoundedCornerShape(28.dp),
         title = {
             Text(
-                "⏰ Adjust Alarm for ${routine.subject}",
+                "Adjust Alarm for ${routine.subject}",
                 fontWeight = FontWeight.Bold,
-                color = theme.textPrimary
+                fontSize = 18.sp,
+                color = Color.White
             )
         },
         text = {
-            Column {
-                Text(
-                    "Select Quick Time Preset:",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = theme.textPrimary
-                )
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { selectedHour = 7; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("🌅 Morning", color = theme.textPrimary) }
-                    Button(
-                        onClick = { selectedHour = 13; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("☀️ Noon", color = theme.textPrimary) }
-                }
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { selectedHour = 18; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("🌆 Evening", color = theme.textPrimary) }
-                    Button(
-                        onClick = { selectedHour = 21; selectedMinute = 0 },
-                        shape = RoundedCornerShape(50),
-                        colors = ButtonDefaults.buttonColors(containerColor = theme.softContainer)
-                    ) { Text("🌙 Night", color = theme.textPrimary) }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Fine-tune Time:",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    color = theme.textPrimary
-                )
-                Spacer(Modifier.height(8.dp))
-
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Hour", fontSize = 12.sp, color = theme.textSecondary)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                selectedHour = if (selectedHour == 0) 23 else selectedHour - 1
-                            }) { Text("-", color = theme.primary, fontSize = 18.sp) }
-                            Text(
-                                String.format(Locale.US, "%02d", selectedHour),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = theme.textPrimary
-                            )
-                            TextButton(onClick = {
-                                selectedHour = (selectedHour + 1) % 24
-                            }) { Text("+", color = theme.primary, fontSize = 18.sp) }
-                        }
-                    }
-                    Text(":", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = theme.primary)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("Minute", fontSize = 12.sp, color = theme.textSecondary)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = {
-                                selectedMinute =
-                                    if (selectedMinute < 5) 55 else selectedMinute - 5
-                            }) { Text("-", color = theme.primary, fontSize = 18.sp) }
-                            Text(
-                                String.format(Locale.US, "%02d", selectedMinute),
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = theme.textPrimary
-                            )
-                            TextButton(onClick = {
-                                selectedMinute = (selectedMinute + 5) % 60
-                            }) { Text("+", color = theme.primary, fontSize = 18.sp) }
-                        }
+                    WheelPicker(
+                        items = hours.map { String.format(Locale.US, "%02d", it) },
+                        selectedIndex = hours.indexOf(selectedHour12).coerceAtLeast(0),
+                        onItemSelected = { index -> selectedHour12 = hours[index] },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Text(
+                        ":",
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE2E8F0),
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+
+                    WheelPicker(
+                        items = minutes.map { String.format(Locale.US, "%02d", it) },
+                        selectedIndex = minutes.indexOf(selectedMinute).coerceAtLeast(0),
+                        onItemSelected = { index -> selectedMinute = minutes[index] },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    Spacer(Modifier.width(12.dp))
+
+                    Column(
+                        modifier = Modifier
+                            .width(60.dp)
+                            .fillMaxHeight(),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            "am",
+                            fontSize = if (isAm) 24.sp else 18.sp,
+                            fontWeight = if (isAm) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isAm) Color(0xFFFEE2E2) else Color(0xFF64748B),
+                            modifier = Modifier
+                                .clickable { isAm = true }
+                                .padding(vertical = 8.dp)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "pm",
+                            fontSize = if (!isAm) 24.sp else 18.sp,
+                            fontWeight = if (!isAm) FontWeight.Bold else FontWeight.Normal,
+                            color = if (!isAm) Color(0xFFFEE2E2) else Color(0xFF64748B),
+                            modifier = Modifier
+                                .clickable { isAm = false }
+                                .padding(vertical = 8.dp)
+                        )
                     }
                 }
             }
@@ -2558,18 +2602,64 @@ fun InteractiveAlarmAdjusterDialog(
                 shape = RoundedCornerShape(50),
                 colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
                 onClick = {
-                    onSave(routine.copy(hour = selectedHour, minute = selectedMinute, isEnabled = true))
+                    val finalHour24 = when {
+                        isAm && selectedHour12 == 12 -> 0
+                        isAm -> selectedHour12
+                        !isAm && selectedHour12 == 12 -> 12
+                        else -> selectedHour12 + 12
+                    }
+                    onSave(routine.copy(hour = finalHour24, minute = selectedMinute, isEnabled = true))
                 }
             ) {
-                Text("Save & Enable Alarm")
+                Text("Save & Enable Alarm", color = Color.White)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = theme.textSecondary)
+                Text("Cancel", color = Color(0xFF94A3B8))
             }
         }
     )
+}
+
+@Composable
+fun WheelPicker(
+    items: List<String>,
+    selectedIndex: Int,
+    onItemSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = (selectedIndex - 1).coerceAtLeast(0))
+
+    LaunchedEffect(selectedIndex) {
+        val target = (selectedIndex - 1).coerceIn(0, (items.size - 3).coerceAtLeast(0))
+        listState.animateScrollToItem(target)
+    }
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        items(items.size) { index ->
+            val isSelected = index == selectedIndex
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clickable { onItemSelected(index) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = items[index],
+                    fontSize = if (isSelected) 28.sp else 18.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) Color(0xFFFEE2E2) else Color(0xFF64748B)
+                )
+            }
+        }
+    }
 }
 
 private fun formatTime12Hr(hour24: Int, minute: Int): String {
@@ -2701,5 +2791,396 @@ fun loadRoutines(sharedPref: SharedPreferences): List<RoutineItem> {
                 colorIndex = parts[7].toIntOrNull() ?: 0
             )
         } else null
+    }
+}
+
+@Composable
+fun SettingsSection(
+    studentName: String,
+    studentEmail: String,
+    avatarPic: String,
+    currentTheme: AppThemeStyle,
+    onOpenProfile: () -> Unit,
+    onOpenThemeSelection: () -> Unit,
+    onLogOut: () -> Unit,
+) {
+    val theme = LocalAppTheme.current
+    var classReminders by remember { mutableStateOf(true) }
+    var dailySummary by remember { mutableStateOf(true) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 24.dp)
+    ) {
+        Text(
+            "Settings",
+            fontWeight = FontWeight.Bold,
+            fontSize = 26.sp,
+            color = theme.textPrimary
+        )
+        Text(
+            "Make PadhaiPLUS+ work for you",
+            fontSize = 14.sp,
+            color = theme.textSecondary
+        )
+        Spacer(Modifier.height(20.dp))
+
+        // Profile Card
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 4.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenProfile() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(theme.softContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(avatarPic, fontSize = 28.sp)
+                }
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        studentName.ifBlank { "Sasim" },
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = theme.textPrimary
+                    )
+                    Text(
+                        "Manage profile & avatar",
+                        fontSize = 13.sp,
+                        color = theme.textSecondary
+                    )
+                }
+                Text("›", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = theme.primary)
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "Study preferences",
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            color = theme.textPrimary
+        )
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = theme.cardSurface,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Class reminders", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("Get notified before each class", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                    Switch(
+                        checked = classReminders,
+                        onCheckedChange = { classReminders = it }
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = theme.borderAccent.copy(alpha = 0.2f))
+                Spacer(Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Reminder time", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("Get Reminder before time ends", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("10 min before", fontSize = 13.sp, color = theme.primary, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.width(4.dp))
+                        Text("›", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.primary)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+                HorizontalDivider(color = theme.borderAccent.copy(alpha = 0.2f))
+                Spacer(Modifier.height(14.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Daily study summary", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("A little reflection on your progress", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                    Switch(
+                        checked = dailySummary,
+                        onCheckedChange = { dailySummary = it }
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "Theme selection",
+            fontWeight = FontWeight.Bold,
+            fontSize = 16.sp,
+            color = theme.textPrimary
+        )
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = theme.cardSurface,
+            shadowElevation = 2.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onOpenThemeSelection() }
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("Theme", fontWeight = FontWeight.SemiBold, fontSize = 15.sp, color = theme.textPrimary)
+                    Text("Choose your study space's look", fontSize = 12.sp, color = theme.textSecondary)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(currentTheme.displayName, fontSize = 13.sp, color = theme.primary, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.width(4.dp))
+                    Text("›", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = theme.primary)
+                }
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
+
+        OutlinedButton(
+            onClick = onLogOut,
+            shape = RoundedCornerShape(50),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(50.dp)
+        ) {
+            Text("Log out", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFEF4444))
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("PadhaiPLUS+", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = theme.textSecondary)
+            Text("Your space to learn, one day at a time.", fontSize = 12.sp, color = theme.textSecondary.copy(alpha = 0.7f))
+        }
+    }
+}
+
+@Composable
+fun ThemeSelectionScreen(
+    currentTheme: AppThemeStyle,
+    onSelectTheme: (AppThemeStyle) -> Unit,
+    onBack: () -> Unit,
+) {
+    val theme = LocalAppTheme.current
+    var selectedAppTheme by remember { mutableStateOf(currentTheme) }
+    var selectedAccent by remember { mutableStateOf("Lavender") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(bottom = 24.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { onBack() }.padding(vertical = 4.dp)
+        ) {
+            Text("←", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = theme.textPrimary)
+            Spacer(Modifier.width(12.dp))
+            Column {
+                Text("Theme", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = theme.textPrimary)
+                Text("A little more you. A little more focus.", fontSize = 13.sp, color = theme.textSecondary)
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        Text("Appearance", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+        Text("Pick the light that feels right.", fontSize = 12.sp, color = theme.textSecondary)
+        Spacer(Modifier.height(12.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            listOf(
+                Triple("Light", "☀️", true),
+                Triple("Dark", "🌙", false),
+                Triple("System", "⚡", false)
+            ).forEach { (label, emoji, isSelected) ->
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = theme.cardSurface,
+                    border = if (isSelected) BorderStroke(2.dp, theme.primary) else null,
+                    shadowElevation = 2.dp,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(emoji, fontSize = 24.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = theme.textPrimary)
+                        Spacer(Modifier.height(4.dp))
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .border(2.dp, if (isSelected) theme.primary else theme.borderAccent, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(theme.primary)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text("Accent color", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+                Text("Choose your vibe", fontSize = 12.sp, color = theme.textSecondary)
+            }
+            Text(selectedAccent, fontSize = 13.sp, color = theme.textSecondary, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(12.dp))
+
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = theme.cardSurface,
+            shadowElevation = 2.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceAround,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOf(
+                    Pair("Lavender", Color(0xFF6366F1)),
+                    Pair("Ocean", Color(0xFF3B82F6)),
+                    Pair("Sage", Color(0xFF10B981)),
+                    Pair("Rose", Color(0xFFEC4899)),
+                    Pair("Amber", Color(0xFFF59E0B))
+                ).forEach { (name, color) ->
+                    val isSelected = selectedAccent == name
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .clickable { selectedAccent = name },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isSelected) {
+                            Text("✓", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Text("Preview", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+        Spacer(Modifier.height(10.dp))
+
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = theme.cardSurface,
+            shadowElevation = 4.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Your study space", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = theme.textPrimary)
+                Text("A little progress, every day.", fontSize = 12.sp, color = theme.textSecondary)
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = theme.softContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("UP NEXT", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = theme.primary)
+                        Text("Mathematics", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = theme.textPrimary)
+                        Text("2:00 PM – 3:00 PM", fontSize = 12.sp, color = theme.textSecondary)
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(30.dp))
+
+        Button(
+            onClick = {
+                onSelectTheme(selectedAppTheme)
+                onBack()
+            },
+            shape = RoundedCornerShape(50),
+            colors = ButtonDefaults.buttonColors(containerColor = theme.primary),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+        ) {
+            Text("Done", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            "Make your study space feel like home.",
+            fontSize = 12.sp,
+            color = theme.textSecondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
